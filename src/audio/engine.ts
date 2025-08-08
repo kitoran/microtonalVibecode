@@ -50,6 +50,18 @@ export function startTone(
 
   osc.start();
 
+  const setRatio = (r: Ratio) => {
+    const f = baseHz * ratioToFloat(r);
+    try {
+      // Smoothly retune to avoid clicks
+      if ((osc.frequency as any).setTargetAtTime) {
+        (osc.frequency as any).setTargetAtTime(f, ctx.currentTime, 0.01);
+      } else {
+        osc.frequency.setValueAtTime(f, ctx.currentTime);
+      }
+    } catch {}
+  };
+
   let stopped = false;
   const stop = () => {
     if (stopped) return;
@@ -70,5 +82,5 @@ export function startTone(
     }, 60);
   };
 
-  return { stop };
+  return { stop, setRatio };
 }

@@ -70,7 +70,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
   // --- Marquee ---
   const containerRef = useRef<HTMLDivElement | null>(null);
   const timelineRef = useRef<HTMLDivElement | null>(null);
-  const notePreviewHandles = useRef<Map<number, { stop: () => void }>>(new Map());
+  const notePreviewHandles = useRef<Map<number, { stop: () => void; setRatio?: (r: Ratio) => void }>>(new Map());
   const dragYOffsetRef = useRef<number | null>(null);
   const [draggingNoteIndex, setDraggingNoteIndex] = useState<number | null>(null);
   const [draggingPos, setDraggingPos] = useState<{ x: number; y: number } | null>(null);
@@ -464,6 +464,15 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
                 // Initialize controlled drag position
                 setDraggingNoteIndex(i);
                 setDraggingPos({ x, y });
+                // Ensure a preview tone is active for this note while dragging
+                if (!notePreviewHandles.current.has(i)) {
+                  const handle = startTone(
+                    project.tuningRootHz,
+                    note.ratio,
+                    Math.max(0, Math.min(1, note.velocity))
+                  );
+                  notePreviewHandles.current.set(i, handle);
+                }
                 // Track pointer offset from note top to improve perceived follow
                 if (containerRef.current) {
                   const rect = containerRef.current.getBoundingClientRect();
@@ -473,15 +482,25 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
               onDrag={(e, d) => {
                 const snapX = Math.round(d.x / (BEAT_PX / 4)) * (BEAT_PX / 4);
                 let snappedY = d.y;
+                let newRatio = note.ratio;
                 if (containerRef.current) {
                   const me = e as MouseEvent;
                   const rect = containerRef.current.getBoundingClientRect();
                   const desiredTop = me.clientY - rect.top - (dragYOffsetRef.current ?? 0);
-                  snappedY = findNearestRowByYPx(desiredTop).y;
+                  const nearest = findNearestRowByYPx(desiredTop);
+                  snappedY = nearest.y;
+                  newRatio = nearest.ratio;
                 } else {
-                  snappedY = findNearestRowByYPx(d.y).y;
+                  const nearest = findNearestRowByYPx(d.y);
+                  snappedY = nearest.y;
+                  newRatio = nearest.ratio;
                 }
                 setDraggingPos({ x: snapX, y: snappedY });
+                // Retune active preview while dragging
+                const h = notePreviewHandles.current.get(i);
+                if (h && h.setRatio) {
+                  try { h.setRatio(newRatio); } catch {}
+                }
               }}
               onDragStop={(e, d) => {
                 const newStart = Math.max(0, Math.round(d.x / (BEAT_PX / 4)) / 4);
@@ -498,6 +517,12 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
                 setDraggingNoteIndex(null);
                 setDraggingPos(null);
                 dragYOffsetRef.current = null;
+                // Stop the preview started for drag if it wasn't started by a press
+                const h = notePreviewHandles.current.get(i);
+                if (h) {
+                  try { h.stop(); } catch {}
+                  notePreviewHandles.current.delete(i);
+                }
               }}
               onResizeStop={(_, __, ref, ___, pos) => {
                 const snappedStart = Math.max(0, Math.round(pos.x / (BEAT_PX / 4)) / 4);
