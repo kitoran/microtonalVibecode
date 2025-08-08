@@ -31,7 +31,7 @@ export const exampleProject: Project = {
           }
         }
         return list.sort((a, b) => {
-          const ratioA = a.ratio.num / a.ratio.den;
+          const ratioA = a.ratio.num / a.ratio.den; 
           const ratioB = b.ratio.num / b.ratio.den;
           return ratioA - ratioB;
         });

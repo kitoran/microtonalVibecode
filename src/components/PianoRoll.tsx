@@ -20,9 +20,20 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
   // --- Pitch rows (use channel tuning) ---
   const tuningRows = channel.tuning;
 
+  const [minLog, maxLog] = useMemo(() => {
+    if (tuningRows.length === 0) return [0, 1] as const;
+    const logs = tuningRows.map((t) => Math.log(t.ratio.num / t.ratio.den));
+    return [Math.min(...logs), Math.max(...logs)] as const;
+  }, [tuningRows]);
+
+  // Map a ratio to a vertical unit position proportional to log(ratio),
+  // normalized such that maxLog -> 0 (top) and minLog -> span (bottom).
   const getY = (ratio: Ratio) => {
-    const idx = tuningRows.findIndex((t) => t.ratio.num === ratio.num && t.ratio.den === ratio.den);
-    return idx === -1 ? 0 : idx;
+    const val = Math.log(ratio.num / ratio.den);
+    const range = maxLog - minLog || 1;
+    const scaled = (maxLog - val) / range; // 0..1 where larger ratio is closer to 0 (top)
+    const span = Math.max(tuningRows.length - 1, 1);
+    return scaled * span;
   };
 
   // --- Selection ---
@@ -114,10 +125,16 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
     if (e.button !== 0) return; // only left click
     const rect = containerRef.current!.getBoundingClientRect();
     const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const yPx = e.clientY - rect.top;
     const start = Math.floor(x / (BEAT_PX / 4)) / 4;
-    const row = Math.floor(y / ROW_PX);
-    const ratio = tuningRows[row]?.ratio || { num: 1, den: 1 };
+    const yUnits = yPx / ROW_PX;
+    let nearestIdx = 0;
+    let best = Infinity;
+    tuningRows.forEach((t, idx) => {
+      const dy = Math.abs(getY(t.ratio) - yUnits);
+      if (dy < best) { best = dy; nearestIdx = idx; }
+    });
+    const ratio = tuningRows[nearestIdx]?.ratio || { num: 1, den: 1 };
 
     const newNote: Note = { start, duration: 1, ratio, velocity: 1.0 };
     setProject({
@@ -201,7 +218,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
           <div
             key={t.name ?? `${t.ratio.num}/${t.ratio.den}`}
             className="absolute border-t border-neutral-700/50 text-xs text-neutral-500 pl-1 select-none"
-            style={{ top: row * ROW_PX, left: 0, width: widthPx, height: ROW_PX }}
+            style={{ top: getY(t.ratio) * ROW_PX, left: 0, width: widthPx, height: ROW_PX }}
           >
             {fundamental
               ? `${divideRatios(t.ratio, fundamental).num}/${divideRatios(t.ratio, fundamental).den}`
