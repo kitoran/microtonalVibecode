@@ -36,6 +36,20 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
     return scaled * span;
   };
 
+  // Find nearest tuning row given a Y pixel position; return snapped Y and the row's ratio
+  const findNearestRowByYPx = (yPx: number): { y: number; ratio: Ratio } => {
+    if (tuningRows.length === 0) return { y: 0, ratio: { num: 1, den: 1 } };
+    let nearestIdx = 0;
+    let best = Infinity;
+    tuningRows.forEach((t, idx) => {
+      const rowY = getY(t.ratio) * ROW_PX;
+      const dy = Math.abs(rowY - yPx);
+      if (dy < best) { best = dy; nearestIdx = idx; }
+    });
+    const snappedY = getY(tuningRows[nearestIdx].ratio) * ROW_PX;
+    return { y: snappedY, ratio: tuningRows[nearestIdx].ratio };
+  };
+
   // --- Selection ---
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const toggleSelect = (i: number, additive: boolean) =>
@@ -57,6 +71,9 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
   const containerRef = useRef<HTMLDivElement | null>(null);
   const timelineRef = useRef<HTMLDivElement | null>(null);
   const notePreviewHandles = useRef<Map<number, { stop: () => void }>>(new Map());
+  const dragYOffsetRef = useRef<number | null>(null);
+  const [draggingNoteIndex, setDraggingNoteIndex] = useState<number | null>(null);
+  const [draggingPos, setDraggingPos] = useState<{ x: number; y: number } | null>(null);
   const [marquee, setMarquee] = useState<{ active: boolean; x: number; y: number; w: number; h: number }>({
     active: false, x: 0, y: 0, w: 0, h: 0
   });
@@ -405,11 +422,11 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
             <Rnd
               key={i}
               bounds="parent"
-              position={{ x, y }}
+              position={{ x: i === draggingNoteIndex && draggingPos ? draggingPos.x : x, y: i === draggingNoteIndex && draggingPos ? draggingPos.y : y }}
               size={{ width: w, height: h }}
-              dragAxis="x"
+              dragAxis="both"
               enableResizing={{ left: true, right: true, top: false, bottom: false }}
-              dragGrid={[BEAT_PX / 4, ROW_PX]}
+              dragGrid={[BEAT_PX / 4, 1]}
               resizeGrid={[BEAT_PX / 4, ROW_PX]}
               onMouseDown={(e) => {
                 const me = e as MouseEvent;
@@ -444,10 +461,43 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
                 if (!isSel && me.button === 0) {
                   toggleSelect(i, me.shiftKey);
                 }
+                // Initialize controlled drag position
+                setDraggingNoteIndex(i);
+                setDraggingPos({ x, y });
+                // Track pointer offset from note top to improve perceived follow
+                if (containerRef.current) {
+                  const rect = containerRef.current.getBoundingClientRect();
+                  dragYOffsetRef.current = me.clientY - (rect.top + y);
+                }
               }}
-              onDragStop={(_, d) => {
+              onDrag={(e, d) => {
+                const snapX = Math.round(d.x / (BEAT_PX / 4)) * (BEAT_PX / 4);
+                let snappedY = d.y;
+                if (containerRef.current) {
+                  const me = e as MouseEvent;
+                  const rect = containerRef.current.getBoundingClientRect();
+                  const desiredTop = me.clientY - rect.top - (dragYOffsetRef.current ?? 0);
+                  snappedY = findNearestRowByYPx(desiredTop).y;
+                } else {
+                  snappedY = findNearestRowByYPx(d.y).y;
+                }
+                setDraggingPos({ x: snapX, y: snappedY });
+              }}
+              onDragStop={(e, d) => {
                 const newStart = Math.max(0, Math.round(d.x / (BEAT_PX / 4)) / 4);
-                updateNote(i, { start: newStart });
+                let newRatio = note.ratio;
+                if (containerRef.current) {
+                  const me = e as MouseEvent;
+                  const rect = containerRef.current.getBoundingClientRect();
+                  const desiredTop = me.clientY - rect.top - (dragYOffsetRef.current ?? 0);
+                  newRatio = findNearestRowByYPx(desiredTop).ratio;
+                } else {
+                  newRatio = findNearestRowByYPx(d.y).ratio;
+                }
+                updateNote(i, { start: newStart, ratio: newRatio });
+                setDraggingNoteIndex(null);
+                setDraggingPos(null);
+                dragYOffsetRef.current = null;
               }}
               onResizeStop={(_, __, ref, ___, pos) => {
                 const snappedStart = Math.max(0, Math.round(pos.x / (BEAT_PX / 4)) / 4);
