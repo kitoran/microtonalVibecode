@@ -229,6 +229,12 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
           const w = Math.max(0.25 * BEAT_PX, note.duration * BEAT_PX);
           const h = ROW_PX - 6;
           const isSel = selected.has(i);
+          const isFundamental = fundamental
+            ? (() => {
+                const rel = divideRatios(note.ratio, fundamental);
+                return rel.num === rel.den;
+              })()
+            : false;
 
           return (
             <Rnd
@@ -240,12 +246,14 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
               enableResizing={{ left: true, right: true, top: false, bottom: false }}
               dragGrid={[BEAT_PX / 4, ROW_PX]}
               resizeGrid={[BEAT_PX / 4, ROW_PX]}
-              onDragStart={(e) => {
+              onMouseDown={(e) => {
                 const me = e as MouseEvent;
                 if (me.button === 1) { // middle click
                   setFundamental(note.ratio);
-                  return;
                 }
+              }}
+              onDragStart={(e) => {
+                const me = e as MouseEvent;
                 if (!isSel && me.button === 0) {
                   toggleSelect(i, me.shiftKey);
                 }
@@ -260,8 +268,12 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
                 updateNote(i, { start: snappedStart, duration: snappedDur });
               }}
               className={`note absolute rounded px-1 flex items-center text-xs select-none ${
-                isSel ? "bg-blue-400 ring-2 ring-blue-200" : "bg-blue-600 hover:bg-blue-500"
-              } text-white`}
+                isFundamental
+                  ? "bg-white text-black ring-2 ring-yellow-400"
+                  : isSel
+                  ? "bg-blue-400 ring-2 ring-blue-200 text-white"
+                  : "bg-blue-600 hover:bg-blue-500 text-white"
+              }`}
               title={`start=${note.start} dur=${note.duration}`}
               onDoubleClick={() =>
                 playTone(project.tuningRootHz, note.ratio, note.duration, note.velocity)
