@@ -172,7 +172,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
     <div className="flex flex-col flex-1 min-h-0">
       {/* Ruler */}
       <div className="flex gap-0.5 mb-1 text-xs text-neutral-400 font-mono select-none overflow-x-auto">
-        <div style={{ width: widthPx }}>
+        <div className="whitespace-nowrap" style={{ width: widthPx }}>
           {Array.from({ length: totalBeats + 1 }).map((_, i) => (
             <div key={i} className="inline-block text-center" style={{ width: BEAT_PX }}>
               {i}
