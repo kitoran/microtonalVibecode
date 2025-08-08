@@ -49,8 +49,13 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
   // --- Fundamental ---
   const [fundamental, setFundamental] = useState<Ratio | null>(null);
 
+  // --- Transport / timeline state ---
+  const [playheadBeat, setPlayheadBeat] = useState<number>(0);
+  const [timeSelection, setTimeSelection] = useState<{ start: number; end: number } | null>(null);
+
   // --- Marquee ---
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const timelineRef = useRef<HTMLDivElement | null>(null);
   const [marquee, setMarquee] = useState<{ active: boolean; x: number; y: number; w: number; h: number }>({
     active: false, x: 0, y: 0, w: 0, h: 0
   });
@@ -117,6 +122,40 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
     e.preventDefault();
     if (!containerRef.current) return;
     beginMarquee(e.clientX, e.clientY);
+  };
+
+  // --- Timeline interaction (playhead and time selection) ---
+  const beginTimelineGesture = (clientX: number) => {
+    if (!timelineRef.current) return;
+    const rect = timelineRef.current.getBoundingClientRect();
+    const snap = (xPx: number) => Math.max(0, Math.round((xPx / (BEAT_PX / 4))) / 4);
+    const anchorBeat = snap(clientX - rect.left);
+    let moved = false;
+    let currentSel = { start: anchorBeat, end: anchorBeat };
+    setTimeSelection(currentSel);
+
+    const onMove = (e: MouseEvent) => {
+      if (!timelineRef.current) return;
+      const r = timelineRef.current.getBoundingClientRect();
+      const bx = snap(e.clientX - r.left);
+      moved = moved || Math.abs(bx - anchorBeat) >= 0.01;
+      currentSel = { start: Math.min(anchorBeat, bx), end: Math.max(anchorBeat, bx) };
+      setTimeSelection(currentSel);
+    };
+
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove, true);
+      window.removeEventListener("mouseup", onUp, true);
+      if (!moved) {
+        setTimeSelection(null);
+        setPlayheadBeat(anchorBeat);
+      } else {
+        setPlayheadBeat(currentSel.start);
+      }
+    };
+
+    window.addEventListener("mousemove", onMove, true);
+    window.addEventListener("mouseup", onUp, true);
   };
 
   // --- Add note on empty left-click ---
@@ -194,6 +233,43 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
         </div>
       </div>
 
+      {/* Timeline bar */}
+      <div className="mb-2">
+        <div
+          className="relative h-6 border border-neutral-700 bg-neutral-800 rounded overflow-x-auto"
+          onMouseDown={(e) => beginTimelineGesture(e.clientX)}
+          title="Click to set playhead. Drag to select time interval."
+        >
+          <div ref={timelineRef} className="relative" style={{ width: widthPx, height: "100%" }}>
+            {/* Selection */}
+            {timeSelection && (
+              <div
+                className="absolute pointer-events-none bg-blue-400/20"
+                style={{
+                  left: timeSelection.start * BEAT_PX,
+                  width: Math.max(0, (timeSelection.end - timeSelection.start)) * BEAT_PX,
+                  top: 0,
+                  bottom: 0,
+                }}
+              />
+            )}
+            {/* Beat lines */}
+            {Array.from({ length: totalBeats + 1 }).map((_, i) => (
+              <div
+                key={`tl-${i}`}
+                className={`absolute ${i % 4 === 0 ? "bg-neutral-600/70" : "bg-neutral-700/40"}`}
+                style={{ left: i * BEAT_PX, top: 0, bottom: 0, width: 1 }}
+              />
+            ))}
+            {/* Playhead */}
+            <div
+              className="absolute pointer-events-none border-l-2 border-red-400"
+              style={{ left: playheadBeat * BEAT_PX, top: 0, bottom: 0 }}
+            />
+          </div>
+        </div>
+      </div>
+
       {/* Grid */}
       <div
         ref={containerRef}
@@ -234,6 +310,19 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
             style={{ left: i * BEAT_PX, top: 0, height: heightPx, borderLeftWidth: 1 }}
           />
         ))}
+
+        {/* Time selection overlay (grid) */}
+        {timeSelection && (
+          <div
+            className="absolute pointer-events-none bg-blue-400/10"
+            style={{
+              left: timeSelection.start * BEAT_PX,
+              top: 0,
+              width: Math.max(0, (timeSelection.end - timeSelection.start)) * BEAT_PX,
+              height: heightPx,
+            }}
+          />
+        )}
 
         {/* Notes */}
         {channel.notes.map((note, i) => {
@@ -296,6 +385,12 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
             </Rnd>
           );
         })}
+
+        {/* Playhead (grid) */}
+        <div
+          className="absolute pointer-events-none border-l-2 border-red-400 z-30"
+          style={{ left: playheadBeat * BEAT_PX, top: 0, height: heightPx }}
+        />
 
         {/* Marquee rectangle */}
         {marquee.active && (
