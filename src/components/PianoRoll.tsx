@@ -50,25 +50,37 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
 
   const beginMarquee = (clientX: number, clientY: number) => {
     const rect = containerRef.current!.getBoundingClientRect();
-    setMarquee({ active: true, x: clientX - rect.left, y: clientY - rect.top, w: 0, h: 0 });
+    let marqueeState = { x: clientX - rect.left, y: clientY - rect.top, w: 0, h: 0 };
+    setMarquee({ active: true, ...marqueeState });
+
+    let dragStartedInside =
+      clientX >= rect.left &&
+      clientX <= rect.right &&
+      clientY >= rect.top &&
+      clientY <= rect.bottom;
 
     const onMove = (e: MouseEvent) => {
       const r = containerRef.current!.getBoundingClientRect();
+      marqueeState = {
+        ...marqueeState,
+        w: e.clientX - r.left - marqueeState.x,
+        h: e.clientY - r.top - marqueeState.y
+      };
       setMarquee((m) => ({
         ...m,
-        w: e.clientX - r.left - m.x,
-        h: e.clientY - r.top - m.y
+        w: marqueeState.w,
+        h: marqueeState.h
       }));
     };
 
-    const onUp = () => {
+    const onUp = (e: MouseEvent) => {
       window.removeEventListener("mousemove", onMove, true);
       window.removeEventListener("mouseup", onUp, true);
-      // Select intersecting notes
-      const rx = Math.min(marquee.x, marquee.x + marquee.w);
-      const ry = Math.min(marquee.y, marquee.y + marquee.h);
-      const rw = Math.abs(marquee.w);
-      const rh = Math.abs(marquee.h);
+      // Use the latest marqueeState for selection
+      const rx = Math.min(marqueeState.x, marqueeState.x + marqueeState.w);
+      const ry = Math.min(marqueeState.y, marqueeState.y + marqueeState.h);
+      const rw = Math.abs(marqueeState.w);
+      const rh = Math.abs(marqueeState.h); 
       const rRight = rx + rw;
       const rBottom = ry + rh;
 
@@ -85,6 +97,9 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
       });
       setSelected(hits);
       setMarquee({ active: false, x: 0, y: 0, w: 0, h: 0 });
+
+      // Always prevent context menu after drag-select
+      document.addEventListener("contextmenu", (ev) => ev.preventDefault(), { capture: true, once: true });
     };
 
     window.addEventListener("mousemove", onMove, true);
@@ -171,9 +186,18 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
         ref={containerRef}
         className="relative border border-neutral-700 bg-neutral-800 rounded overflow-auto flex-1 min-h-0"
         style={{ width: "100%", minHeight: heightPx }}
-        onContextMenu={onContextMenu}
+        onContextMenu={(e) => {
+          // Prevent default context menu and start marquee selection
+          e.preventDefault();
+        }}
         onMouseDown={(e) => {
-          if (e.button === 0) handleGridClick(e);
+          if (e.button === 2) {
+            // Right mouse button starts marquee selection
+            beginMarquee(e.clientX, e.clientY);
+          } else if (e.button === 0) {
+            // Left mouse button: normal grid click (add note)
+            handleGridClick(e);
+          }
         }}
       >
         {/* Horizontal pitch rows */}
