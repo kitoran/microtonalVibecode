@@ -56,6 +56,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
   // --- Marquee ---
   const containerRef = useRef<HTMLDivElement | null>(null);
   const timelineRef = useRef<HTMLDivElement | null>(null);
+  const notePreviewHandles = useRef<Map<number, { stop: () => void }>>(new Map());
   const [marquee, setMarquee] = useState<{ active: boolean; x: number; y: number; w: number; h: number }>({
     active: false, x: 0, y: 0, w: 0, h: 0
   });
@@ -247,6 +248,16 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [project, selected, channelId, setProject]);
 
+  // --- Cleanup any active note previews on unmount ---
+  useEffect(() => {
+    return () => {
+      notePreviewHandles.current.forEach((h) => {
+        try { h.stop(); } catch {}
+      });
+      notePreviewHandles.current.clear();
+    };
+  }, []);
+
   // --- Update note helper ---
   const updateNote = (noteIndex: number, patch: Partial<Note>) => {
     setProject({
@@ -402,8 +413,30 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
               resizeGrid={[BEAT_PX / 4, ROW_PX]}
               onMouseDown={(e) => {
                 const me = e as MouseEvent;
-                if (me.button === 1) { // middle click
+                // Middle click sets fundamental
+                if (me.button === 1) {
                   setFundamental(note.ratio);
+                }
+                // Left click: start preview tone until mouse is released
+                if (me.button === 0) {
+                  if (!notePreviewHandles.current.has(i)) {
+                    const handle = startTone(
+                      project.tuningRootHz,
+                      note.ratio,
+                      Math.max(0, Math.min(1, note.velocity))
+                    );
+                    notePreviewHandles.current.set(i, handle);
+
+                    const stopOnce = () => {
+                      const h = notePreviewHandles.current.get(i);
+                      if (h) {
+                        try { h.stop(); } catch {}
+                        notePreviewHandles.current.delete(i);
+                      }
+                      window.removeEventListener("mouseup", stopOnce, true);
+                    };
+                    window.addEventListener("mouseup", stopOnce, true);
+                  }
                 }
               }}
               onDragStart={(e) => {
