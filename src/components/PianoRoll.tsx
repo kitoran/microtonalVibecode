@@ -151,7 +151,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
   // --- Layout sizes ---
   const totalBeats = Math.max(16, Math.ceil(Math.max(0, ...channel.notes.map((n) => n.start + n.duration))));
   const widthPx = totalBeats * BEAT_PX;
-  const heightPx = Math.max(ROW_PX * Math.max(pitchRows.length, 4), 200);
+  const heightPx = ROW_PX * Math.max(pitchRows.length, 4);
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
@@ -170,7 +170,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
       <div
         ref={containerRef}
         className="relative border border-neutral-700 bg-neutral-800 rounded overflow-auto flex-1 min-h-0"
-        style={{ width: "100%", height: heightPx }}
+        style={{ width: "100%", minHeight: heightPx }}
         onContextMenu={onContextMenu}
         onMouseDown={(e) => {
           if (e.button === 0) handleGridClick(e);
