@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { Project, Note, Ratio } from "../model/project";
 import { divideRatios } from "../utils/ratio";
-import { playTone } from "../audio/engine";
+import { playTone, startTone } from "../audio/engine";
 import { Rnd } from "react-rnd";
 
 interface PianoRollProps {
@@ -129,17 +129,48 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
     if (!timelineRef.current) return;
     const rect = timelineRef.current.getBoundingClientRect();
     const snap = (xPx: number) => Math.max(0, Math.round((xPx / (BEAT_PX / 4))) / 4);
-    const update = (cx: number) => setPlayheadBeat(snap(cx - rect.left));
-    update(clientX);
+
+    const active = new Map<number, { stop: () => void }>();
+
+    const updateForBeat = (beat: number) => {
+      setPlayheadBeat(beat);
+      const overlapped = new Set<number>();
+      channel.notes.forEach((note, idx) => {
+        if (beat >= note.start && beat < note.start + note.duration) {
+          overlapped.add(idx);
+          if (!active.has(idx)) {
+            const handle = startTone(
+              project.tuningRootHz,
+              note.ratio,
+              Math.max(0, Math.min(1, note.velocity))
+            );
+            active.set(idx, handle);
+          }
+        }
+      });
+      // Stop tones that are no longer under the playhead
+      [...active.keys()].forEach((idx) => {
+        if (!overlapped.has(idx)) {
+          const h = active.get(idx)!;
+          try { h.stop(); } catch {}
+          active.delete(idx);
+        }
+      });
+    };
+
+    updateForBeat(snap(clientX - rect.left));
 
     const onMove = (e: MouseEvent) => {
       if (!timelineRef.current) return;
       const r = timelineRef.current.getBoundingClientRect();
-      setPlayheadBeat(snap(e.clientX - r.left));
+      updateForBeat(snap(e.clientX - r.left));
     };
     const onUp = () => {
       window.removeEventListener("mousemove", onMove, true);
       window.removeEventListener("mouseup", onUp, true);
+      // Stop any remaining active tones
+      active.forEach((h) => { try { h.stop(); } catch {} });
+      active.clear();
     };
     window.addEventListener("mousemove", onMove, true);
     window.addEventListener("mouseup", onUp, true);
