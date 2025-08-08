@@ -12,6 +12,7 @@ interface PianoRollProps {
 
 const BEAT_PX = 48; // pixels per beat
 const ROW_PX = 32;  // pixels per pitch row
+const NOTE_H_PX = 10; // slimmer note height in pixels, centered on tuning row
 
 export default function PianoRoll({ project, setProject, channelId }: PianoRollProps) {
   const channel = project.channels.find((c) => c.id === channelId);
@@ -117,9 +118,10 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
       const hits = new Set<number>();
       channel.notes.forEach((note, i) => {
         const nx = note.start * BEAT_PX;
-        const ny = getY(note.ratio) * ROW_PX;
+        const nyCenter = getY(note.ratio) * ROW_PX;
         const nw = note.duration * BEAT_PX;
-        const nh = ROW_PX - 6;
+        const nh = NOTE_H_PX;
+        const ny = nyCenter - nh / 2; // top of rectangle
         const nRight = nx + nw;
         const nBottom = ny + nh;
         const overlap = !(nRight < rx || nx > rRight || nBottom < ry || ny > rBottom);
@@ -374,7 +376,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
           <div
             key={t.name ?? `${t.ratio.num}/${t.ratio.den}`}
             className="absolute border-t border-neutral-700/50 text-xs text-neutral-500 pl-1 select-none"
-            style={{ top: getY(t.ratio) * ROW_PX, left: 0, width: widthPx, height: ROW_PX }}
+            style={{ top: getY(t.ratio) * ROW_PX, left: 0, width: widthPx, height: 1 }}
           >
             {fundamental
               ? `${divideRatios(t.ratio, fundamental).num}/${divideRatios(t.ratio, fundamental).den}`
@@ -407,9 +409,10 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
         {/* Notes */}
         {channel.notes.map((note, i) => {
           const x = note.start * BEAT_PX;
-          const y = getY(note.ratio) * ROW_PX;
+          const yCenter = getY(note.ratio) * ROW_PX;
           const w = Math.max(0.25 * BEAT_PX, note.duration * BEAT_PX);
-          const h = ROW_PX - 6;
+          const h = NOTE_H_PX;
+          const y = yCenter - h / 2; // top
           const isSel = selected.has(i);
           const isFundamental = fundamental
             ? (() => {
@@ -481,21 +484,21 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
               }}
               onDrag={(e, d) => {
                 const snapX = Math.round(d.x / (BEAT_PX / 4)) * (BEAT_PX / 4);
-                let snappedY = d.y;
+                let snappedTop = d.y;
                 let newRatio = note.ratio;
                 if (containerRef.current) {
                   const me = e as MouseEvent;
                   const rect = containerRef.current.getBoundingClientRect();
                   const desiredTop = me.clientY - rect.top - (dragYOffsetRef.current ?? 0);
-                  const nearest = findNearestRowByYPx(desiredTop);
-                  snappedY = nearest.y;
+                  const nearest = findNearestRowByYPx(desiredTop + NOTE_H_PX / 2);
+                  snappedTop = nearest.y - NOTE_H_PX / 2; // center to top
                   newRatio = nearest.ratio;
                 } else {
-                  const nearest = findNearestRowByYPx(d.y);
-                  snappedY = nearest.y;
+                  const nearest = findNearestRowByYPx(d.y + NOTE_H_PX / 2);
+                  snappedTop = nearest.y - NOTE_H_PX / 2;
                   newRatio = nearest.ratio;
                 }
-                setDraggingPos({ x: snapX, y: snappedY });
+                setDraggingPos({ x: snapX, y: snappedTop });
                 // Retune active preview while dragging
                 const h = notePreviewHandles.current.get(i);
                 if (h && h.setRatio) {
@@ -509,9 +512,9 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
                   const me = e as MouseEvent;
                   const rect = containerRef.current.getBoundingClientRect();
                   const desiredTop = me.clientY - rect.top - (dragYOffsetRef.current ?? 0);
-                  newRatio = findNearestRowByYPx(desiredTop).ratio;
+                  newRatio = findNearestRowByYPx(desiredTop + NOTE_H_PX / 2).ratio;
                 } else {
-                  newRatio = findNearestRowByYPx(d.y).ratio;
+                  newRatio = findNearestRowByYPx(d.y + NOTE_H_PX / 2).ratio;
                 }
                 updateNote(i, { start: newStart, ratio: newRatio });
                 setDraggingNoteIndex(null);
@@ -529,7 +532,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
                 const snappedDur = Math.max(0.25, Math.round(ref.offsetWidth / (BEAT_PX / 4)) / 4);
                 updateNote(i, { start: snappedStart, duration: snappedDur });
               }}
-              className={`note absolute rounded px-1 flex items-center text-xs select-none ${
+              className={`note absolute px-1 flex items-center text-xs select-none ${
                 isFundamental
                   ? "bg-white text-black ring-2 ring-yellow-400"
                   : isSel
