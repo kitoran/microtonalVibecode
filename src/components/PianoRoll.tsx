@@ -124,36 +124,49 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
     beginMarquee(e.clientX, e.clientY);
   };
 
-  // --- Timeline interaction (playhead and time selection) ---
-  const beginTimelineGesture = (clientX: number) => {
+  // --- Timeline interaction ---
+  const beginPlayheadDrag = (clientX: number) => {
+    if (!timelineRef.current) return;
+    const rect = timelineRef.current.getBoundingClientRect();
+    const snap = (xPx: number) => Math.max(0, Math.round((xPx / (BEAT_PX / 4))) / 4);
+    const update = (cx: number) => setPlayheadBeat(snap(cx - rect.left));
+    update(clientX);
+
+    const onMove = (e: MouseEvent) => {
+      if (!timelineRef.current) return;
+      const r = timelineRef.current.getBoundingClientRect();
+      setPlayheadBeat(snap(e.clientX - r.left));
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove, true);
+      window.removeEventListener("mouseup", onUp, true);
+    };
+    window.addEventListener("mousemove", onMove, true);
+    window.addEventListener("mouseup", onUp, true);
+  };
+
+  const beginTimeSelection = (clientX: number) => {
     if (!timelineRef.current) return;
     const rect = timelineRef.current.getBoundingClientRect();
     const snap = (xPx: number) => Math.max(0, Math.round((xPx / (BEAT_PX / 4))) / 4);
     const anchorBeat = snap(clientX - rect.left);
     let moved = false;
-    let currentSel = { start: anchorBeat, end: anchorBeat };
-    setTimeSelection(currentSel);
 
     const onMove = (e: MouseEvent) => {
       if (!timelineRef.current) return;
       const r = timelineRef.current.getBoundingClientRect();
       const bx = snap(e.clientX - r.left);
-      moved = moved || Math.abs(bx - anchorBeat) >= 0.01;
-      currentSel = { start: Math.min(anchorBeat, bx), end: Math.max(anchorBeat, bx) };
-      setTimeSelection(currentSel);
+      if (!moved && Math.abs(bx - anchorBeat) >= 0.01) moved = true;
+      if (moved) {
+        const start = Math.min(anchorBeat, bx);
+        const end = Math.max(anchorBeat, bx);
+        setTimeSelection({ start, end });
+      }
     };
-
     const onUp = () => {
       window.removeEventListener("mousemove", onMove, true);
       window.removeEventListener("mouseup", onUp, true);
-      if (!moved) {
-        setTimeSelection(null);
-        setPlayheadBeat(anchorBeat);
-      } else {
-        setPlayheadBeat(currentSel.start);
-      }
     };
-
     window.addEventListener("mousemove", onMove, true);
     window.addEventListener("mouseup", onUp, true);
   };
@@ -237,8 +250,16 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
       <div className="mb-2">
         <div
           className="relative h-6 border border-neutral-700 bg-neutral-800 rounded overflow-x-auto"
-          onMouseDown={(e) => beginTimelineGesture(e.clientX)}
-          title="Click to set playhead. Drag to select time interval."
+          onMouseDown={(e) => {
+            if (e.button === 0) {
+              beginPlayheadDrag(e.clientX);
+            } else if (e.button === 2) {
+              e.preventDefault();
+              beginTimeSelection(e.clientX);
+            }
+          }}
+          onContextMenu={(e) => e.preventDefault()}
+          title="Left-drag: move playhead. Right-drag: select time interval."
         >
           <div ref={timelineRef} className="relative" style={{ width: widthPx, height: "100%" }}>
             {/* Selection */}
