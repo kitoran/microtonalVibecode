@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { Project, Note, Ratio } from "../model/project";
-import { ratioToFloat, divideRatios } from "../utils/ratio";
+import { divideRatios } from "../utils/ratio";
 import { playTone } from "../audio/engine";
 import { Rnd } from "react-rnd";
 
@@ -17,17 +17,13 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
   const channel = project.channels.find((c) => c.id === channelId);
   if (!channel) return <div>Channel not found</div>;
 
-  // --- Pitch rows ---
-  const pitchRows: Ratio[] = useMemo(() => {
-    const uniq = new Map<number, Ratio>();
-    for (const n of channel.notes) uniq.set(ratioToFloat(n.ratio), n.ratio);
-    return [...uniq.entries()]
-      .sort((a, b) => b[0] - a[0])
-      .map(([, r]) => r);
-  }, [channel.notes]);
+  // --- Pitch rows (use channel tuning) ---
+  const tuningRows = channel.tuning;
 
-  const getY = (ratio: Ratio) =>
-    pitchRows.findIndex((r) => r.num === ratio.num && r.den === ratio.den);
+  const getY = (ratio: Ratio) => {
+    const idx = tuningRows.findIndex((t) => t.ratio.num === ratio.num && t.ratio.den === ratio.den);
+    return idx === -1 ? 0 : idx;
+  };
 
   // --- Selection ---
   const [selected, setSelected] = useState<Set<number>>(new Set());
@@ -121,7 +117,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
     const y = e.clientY - rect.top;
     const start = Math.floor(x / (BEAT_PX / 4)) / 4;
     const row = Math.floor(y / ROW_PX);
-    const ratio = pitchRows[row] || { num: 1, den: 1 };
+    const ratio = tuningRows[row]?.ratio || { num: 1, den: 1 };
 
     const newNote: Note = { start, duration: 1, ratio, velocity: 1.0 };
     setProject({
@@ -166,7 +162,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
   // --- Layout sizes ---
   const totalBeats = Math.max(16, Math.ceil(Math.max(0, ...channel.notes.map((n) => n.start + n.duration))));
   const widthPx = totalBeats * BEAT_PX;
-  const heightPx = ROW_PX * Math.max(pitchRows.length, 4);
+  const heightPx = ROW_PX * Math.max(tuningRows.length, 4);
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
@@ -201,15 +197,15 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
         }}
       >
         {/* Horizontal pitch rows */}
-        {pitchRows.map((r, row) => (
+        {tuningRows.map((t, row) => (
           <div
-            key={`${r.num}/${r.den}`}
+            key={t.name ?? `${t.ratio.num}/${t.ratio.den}`}
             className="absolute border-t border-neutral-700/50 text-xs text-neutral-500 pl-1 select-none"
             style={{ top: row * ROW_PX, left: 0, width: widthPx, height: ROW_PX }}
           >
             {fundamental
-              ? `${divideRatios(r, fundamental).num}/${divideRatios(r, fundamental).den}`
-              : `${r.num}/${r.den}`}
+              ? `${divideRatios(t.ratio, fundamental).num}/${divideRatios(t.ratio, fundamental).den}`
+              : `${t.ratio.num}/${t.ratio.den}`}
           </div>
         ))}
 

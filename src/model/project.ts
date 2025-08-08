@@ -13,7 +13,7 @@ export interface Note {
 }
 
 /** Tuning map: pitch class → JI ratio */
-export type TuningMap = Record<string, Ratio>; // e.g. { C: {num: 1, den: 1}, D: {num: 9, den: 8} }
+export type TuningMap = { name?: string; ratio: Ratio }[]; // e.g. [{ name: "C", ratio: { num: 1, den: 1 } }, { name: "D", ratio: { num: 9, den: 8 } }]
 
 /** A single instrument or voice lane */
 export interface Channel {

@@ -13,20 +13,29 @@ export const exampleProject: Project = {
       instrument: "sine",
       volume: 1,
       pan: 0,
-      tuning: {
-
-  C: { num: 1, den: 1 },
-  D: { num: 9, den: 8 },
-  E: { num: 5, den: 4 },
-  F: { num: 4, den: 3 },
-  G: { num: 3, den: 2 },
-  A: { num: 5, den: 3 },
-  Bb: { num: 7, den: 4 },
-  Ab: { num: 8, den: 9 }, // less than 1
-  Gb: { num: 2, den: 3 }, // less than 1
-  Eb: { num: 3, den: 4 }, // less than 1
-  Db: { num: 5, den: 8 }, // less than 1
-      },
+      tuning: (() => {
+        const list: { name?: string; ratio: { num: number; den: number } }[] = [];
+        const gcd = (a: number, b: number): number => {
+          while (b !== 0) {
+            const t = b;
+            b = a % b;
+            a = t;
+          }
+          return Math.abs(a);
+        };
+        for (let num = 1; num <= 9; num++) {
+          for (let den = 1; den <= 9; den++) {
+            if (gcd(num, den) === 1) {
+              list.push({ ratio: { num, den } });
+            }
+          }
+        }
+        return list.sort((a, b) => {
+          const ratioA = a.ratio.num / a.ratio.den;
+          const ratioB = b.ratio.num / b.ratio.den;
+          return ratioA - ratioB;
+        });
+      })(),
       notes: [
         { start: 0, duration: 1, ratio: { num: 1, den: 1 }, velocity: 1 },
         { start: 1, duration: 0.5, ratio: { num: 5, den: 4 }, velocity: 0.9 },
