@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Project, Note, Ratio } from "../model/project";
 import { divideRatios, multiplyRatios, ratioToFloat } from "../utils/ratio";
 import { playTone, startTone } from "../audio/engine";
@@ -199,15 +199,17 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
     window.addEventListener("mouseup", onUp, true);
   };
 
-  const safeStop = (h?: { stop: () => void } | null) => {
+  const safeStop = useCallback((h?: { stop: () => void } | null) => {
     try { h?.stop(); } catch { /* noop */ }
-  };
-  const safeSetRatio = (h: { setRatio?: (r: Ratio) => void } | null | undefined, r: Ratio) => {
+  }, []);
+  const safeSetRatio = useCallback((h: { setRatio?: (r: Ratio) => void } | null | undefined, r: Ratio) => {
     try { h?.setRatio?.(r); } catch { /* noop */ }
-  };
+  }, []);
+  const totalBeats = Math.max(16, Math.ceil(Math.max(0, ...channel.notes.map((n) => n.start + n.duration))));
+  const beatPx = useMemo(() => (containerSize.width > 0 ? containerSize.width / totalBeats : DEFAULT_BEAT_PX), [containerSize.width, totalBeats]);
 
   // --- Timeline interaction ---
-  const beginPlayheadDrag = (clientX: number) => {
+  const beginPlayheadDrag = useCallback((clientX: number) => {
     if (!timelineRef.current) return;
     const rect = timelineRef.current.getBoundingClientRect();
     const snap = (xPx: number) => snapBeatToQuarter(pxToBeats(xPx));
@@ -256,7 +258,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
     };
     window.addEventListener("mousemove", onMove, true);
     window.addEventListener("mouseup", onUp, true);
-  };
+  }, [beatPx, channel, project.tuningRootHz, safeStop]);
 
   const beginTimeSelection = (clientX: number) => {
     if (!timelineRef.current) return;
@@ -285,7 +287,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
   };
 
   // --- PLAYBACK ENGINE (transport) ---
-  const totalBeats = Math.max(16, Math.ceil(Math.max(0, ...channel.notes.map((n) => n.start + n.duration))));
+  // const totalBeats = Math.max(16, Math.ceil(Math.max(0, ...channel.notes.map((n) => n.start + n.duration))));
 
   const stopAllPlaybackTones = () => {
     activePlaybackRef.current.forEach((h) => { safeStop(h); });
@@ -492,7 +494,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
   };
 
   // --- Layout sizes ---
-  const beatPx = useMemo(() => (containerSize.width > 0 ? containerSize.width / totalBeats : DEFAULT_BEAT_PX), [containerSize.width, totalBeats]);
+  // const beatPx = useMemo(() => (containerSize.width > 0 ? containerSize.width / totalBeats : DEFAULT_BEAT_PX), [containerSize.width, totalBeats]);
   const rowPx = useMemo(() => {
     const rows = Math.max(baseRows.length, 1);
     const base = containerSize.height > 0 ? containerSize.height / rows : DEFAULT_ROW_PX;
