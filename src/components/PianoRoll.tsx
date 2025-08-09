@@ -1,8 +1,9 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Project, Note, Ratio } from "../model/project";
-import { divideRatios } from "../utils/ratio";
+import { divideRatios, multiplyRatios } from "../utils/ratio";
 import { playTone, startTone } from "../audio/engine";
 import { Rnd } from "react-rnd";
+import { connectSeries } from "tone";
 
 interface PianoRollProps {
   project: Project;
@@ -20,17 +21,21 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
 
   // --- Pitch rows (use channel tuning) ---
   const tuningRows = channel.tuning;
-
+  const [fundamental, setFundamental] = useState<Ratio | null>(null);
   const [minLog, maxLog] = useMemo(() => {
     if (tuningRows.length === 0) return [0, 1] as const;
-    const logs = tuningRows.map((t) => Math.log(t.ratio.num / t.ratio.den));
+    const logs = tuningRows.map((t) => {
+      const r = fundamental ? multiplyRatios(t.ratio, fundamental) : t.ratio;
+      return Math.log(r.num / r.den);
+    });
     return [Math.min(...logs), Math.max(...logs)] as const;
-  }, [tuningRows]);
+  }, [tuningRows, fundamental]);
 
   // Map a ratio to a vertical unit position proportional to log(ratio),
   // normalized such that maxLog -> 0 (top) and minLog -> span (bottom).
   const getY = (ratio: Ratio) => {
-    const val = Math.log(ratio.num / ratio.den);
+    const rel = fundamental ? divideRatios(ratio, fundamental) : ratio;
+    const val = Math.log(rel.num / rel.den);
     const range = maxLog - minLog || 1;
     const scaled = (maxLog - val) / range; // 0..1 where larger ratio is closer to 0 (top)
     const span = Math.max(tuningRows.length - 1, 1);
@@ -61,9 +66,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
       return next;
     });
 
-  // --- Fundamental ---
-  const [fundamental, setFundamental] = useState<Ratio | null>(null);
-
+  
   // --- Transport / timeline state ---
   const [playheadBeat, setPlayheadBeat] = useState<number>(0);
   const [timeSelection, setTimeSelection] = useState<{ start: number; end: number } | null>(null);
@@ -586,17 +589,19 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
       >
         <div className="relative" style={{ width: widthPx, height: heightPx }}>
           {/* Horizontal pitch rows */}
-        {tuningRows.map((t) => (
+        {tuningRows.map((t) => {
+          let theRatio = fundamental
+              ? multiplyRatios(t.ratio, fundamental)
+              : t.ratio;
+          return (
           <div
-            key={t.name ?? `${t.ratio.num}/${t.ratio.den}`}
+            key={t.name ?? `${theRatio.num}/${theRatio.den}`}
             className="absolute border-t border-neutral-700/50 text-xs text-neutral-500 pl-1 select-none"
-            style={{ top: getY(t.ratio) * rowPx, left: 0, width: widthPx, height: 1 }}
+            style={{ top: getY(theRatio) * rowPx, left: 0, width: widthPx, height: 1 }}
           >
-            {fundamental
-              ? `${divideRatios(t.ratio, fundamental).num}/${divideRatios(t.ratio, fundamental).den}`
-              : `${t.ratio.num}/${t.ratio.den}`}
+            {`${theRatio.num}/${theRatio.den}`}
           </div>
-        ))}
+        )})}
 
         {/* Vertical beat lines */}
         {Array.from({ length: totalBeats + 1 }).map((_, i) => (
@@ -662,6 +667,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
                 const me = e as MouseEvent;
                 // Middle click sets fundamental
                 if (me.button === 1) {
+                  e.preventDefault();
                   setFundamental(note.ratio);
                 }
                 // Left click: start preview tone until mouse is released
