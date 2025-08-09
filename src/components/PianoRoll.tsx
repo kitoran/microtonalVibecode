@@ -714,7 +714,9 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
                 // Track pointer offset from note top to improve perceived follow
                 if (containerRef.current) {
                   const rect = containerRef.current.getBoundingClientRect();
-                  dragYOffsetRef.current = me.clientY - (rect.top + y);
+                  const st0 = containerRef.current.scrollTop;
+                  // Account for scroll position at drag start so pointer offset is correct in content coordinates
+                  dragYOffsetRef.current = me.clientY - (rect.top - st0 + y);
                 }
               }}
               onDrag={(e, d) => {
