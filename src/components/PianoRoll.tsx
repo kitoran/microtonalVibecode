@@ -67,6 +67,11 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
   // --- Transport / timeline state ---
   const [playheadBeat, setPlayheadBeat] = useState<number>(0);
   const [timeSelection, setTimeSelection] = useState<{ start: number; end: number } | null>(null);
+  const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const rafIdRef = useRef<number | null>(null);
+  const playbackStartMsRef = useRef<number>(0);
+  const playbackStartBeatRef = useRef<number>(0);
+  const activePlaybackRef = useRef<Map<number, { stop: () => void }>>(new Map());
 
   // --- Marquee ---
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -236,6 +241,113 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
     window.addEventListener("mouseup", onUp, true);
   };
 
+  // --- PLAYBACK ENGINE (transport) ---
+  const totalBeats = Math.max(16, Math.ceil(Math.max(0, ...channel.notes.map((n) => n.start + n.duration))));
+
+  const stopAllPlaybackTones = () => {
+    activePlaybackRef.current.forEach((h) => { try { h.stop(); } catch {} });
+    activePlaybackRef.current.clear();
+  };
+
+  const tick = () => {
+    const tempo = project.tempo;
+    const now = performance.now();
+    const elapsedSec = (now - playbackStartMsRef.current) / 1000;
+    let beat = playbackStartBeatRef.current + elapsedSec * (tempo / 60);
+
+    if (timeSelection && timeSelection.end > timeSelection.start) {
+      const len = timeSelection.end - timeSelection.start;
+      // Loop
+      if (beat >= timeSelection.end) {
+        // shift anchors forward by loop length to keep continuity
+        const loops = Math.floor((beat - timeSelection.start) / len);
+        playbackStartBeatRef.current -= loops * len;
+        beat = playbackStartBeatRef.current + (performance.now() - playbackStartMsRef.current) / 1000 * (tempo / 60);
+        // Reset voices on wrap
+        stopAllPlaybackTones();
+      }
+    } else {
+      // Stop at project end
+      if (beat >= totalBeats) {
+        setIsPlaying(false);
+        setPlayheadBeat(totalBeats);
+        stopAllPlaybackTones();
+        if (rafIdRef.current != null) cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+        return;
+      }
+    }
+
+    setPlayheadBeat(beat);
+
+    // Gate notes under playhead (similar to scrub behavior)
+    const overlapped = new Set<number>();
+    channel.notes.forEach((note, idx) => {
+      if (beat >= note.start && beat < note.start + note.duration) {
+        overlapped.add(idx);
+        if (!activePlaybackRef.current.has(idx)) {
+          const handle = startTone(
+            project.tuningRootHz,
+            note.ratio,
+            Math.max(0, Math.min(1, note.velocity))
+          );
+          activePlaybackRef.current.set(idx, handle);
+        }
+      }
+    });
+    // Stop tones that are no longer under the playhead
+    Array.from(activePlaybackRef.current.keys()).forEach((idx) => {
+      if (!overlapped.has(idx)) {
+        const h = activePlaybackRef.current.get(idx)!;
+        try { h.stop(); } catch {}
+        activePlaybackRef.current.delete(idx);
+      }
+    });
+
+    rafIdRef.current = requestAnimationFrame(tick);
+  };
+
+  const startPlayback = (fromBeat?: number) => {
+    if (isPlaying) return;
+    const startBeat = Math.max(0, fromBeat ?? (timeSelection ? timeSelection.start : playheadBeat));
+    setPlayheadBeat(startBeat);
+    playbackStartBeatRef.current = startBeat;
+    playbackStartMsRef.current = performance.now();
+    setIsPlaying(true);
+    rafIdRef.current = requestAnimationFrame(tick);
+  };
+
+  const pausePlayback = () => {
+    if (!isPlaying) return;
+    setIsPlaying(false);
+    if (rafIdRef.current != null) cancelAnimationFrame(rafIdRef.current);
+    rafIdRef.current = null;
+    stopAllPlaybackTones();
+    // Anchor next start at current playhead
+    playbackStartBeatRef.current = playheadBeat;
+    playbackStartMsRef.current = performance.now();
+  };
+
+  const stopPlayback = () => {
+    // Stop & reset to loop start or zero
+    if (rafIdRef.current != null) cancelAnimationFrame(rafIdRef.current);
+    rafIdRef.current = null;
+    setIsPlaying(false);
+    stopAllPlaybackTones();
+    const resetBeat = timeSelection ? timeSelection.start : 0;
+    setPlayheadBeat(resetBeat);
+    playbackStartBeatRef.current = resetBeat;
+    playbackStartMsRef.current = performance.now();
+  };
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (rafIdRef.current != null) cancelAnimationFrame(rafIdRef.current);
+      stopAllPlaybackTones();
+    };
+  }, []);
+
   // --- Draw note interaction (left mouse drag on empty grid) ---
   const [drawing, setDrawing] = useState<null | { anchorBeat: number; endBeat: number; ratio: Ratio }>(null);
   const beginDrawNote = (clientX: number, clientY: number, beatPx: number, rowPx: number, noteHPx: number) => {
@@ -307,10 +419,14 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
         });
         setSelected(new Set());
       }
+      if (e.code === "Space") {
+        e.preventDefault();
+        if (isPlaying) pausePlayback(); else startPlayback();
+      }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [project, selected, channelId, setProject]);
+  }, [project, selected, channelId, setProject, isPlaying]);
 
   // --- Cleanup any active note previews on unmount ---
   useEffect(() => {
@@ -335,7 +451,6 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
   };
 
   // --- Layout sizes ---
-  const totalBeats = Math.max(16, Math.ceil(Math.max(0, ...channel.notes.map((n) => n.start + n.duration))));
   const beatPx = useMemo(() => (containerSize.width > 0 ? containerSize.width / totalBeats : DEFAULT_BEAT_PX), [containerSize.width, totalBeats]);
   const rowPx = useMemo(() => {
     const rows = Math.max(tuningRows.length, 1);
@@ -347,6 +462,27 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
+      {/* Transport */}
+      <div className="flex items-center gap-2 mb-2">
+        <button
+          className={`px-3 py-1 rounded ${isPlaying ? "bg-yellow-600 hover:bg-yellow-500" : "bg-green-700 hover:bg-green-600"}`}
+          onClick={() => (isPlaying ? pausePlayback() : startPlayback())}
+          title="Space: Play/Pause"
+        >
+          {isPlaying ? "Pause" : "Play"}
+        </button>
+        <button
+          className="px-3 py-1 rounded bg-neutral-700 hover:bg-neutral-600"
+          onClick={() => stopPlayback()}
+        >
+          Stop
+        </button>
+        <div className="text-xs text-neutral-400 ml-2">
+          Tempo: {project.tempo} BPM
+          {timeSelection ? ` · Loop ${timeSelection.start.toFixed(2)}–${timeSelection.end.toFixed(2)} beats` : ""}
+        </div>
+      </div>
+
       {/* Ruler */}
       <div className="flex gap-0.5 mb-1 text-xs text-neutral-400 font-mono select-none overflow-hidden">
         <div className="whitespace-nowrap" style={{ width: widthPx }}>
