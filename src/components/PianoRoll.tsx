@@ -3,8 +3,7 @@ import type { Project, Note, Ratio } from "../model/project";
 import { divideRatios, multiplyRatios, ratioToFloat } from "../utils/ratio";
 import { playTone, startTone } from "../audio/engine";
 import { Rnd } from "react-rnd";
-import { connectSeries } from "tone";
-
+ 
 interface PianoRollProps {
   project: Project;
   setProject: (p: Project) => void;
@@ -18,44 +17,59 @@ const DEFAULT_ROW_PX = 32;  // fallback pixels per pitch row
 const MIN_FREQ_HZ = 30;
 const MAX_FREQ_HZ = 3000;
 
+/*
+Design note (intentional):
+- Grid rows and labels are displayed relative to a selected fundamental ('displayRows').
+- Notes, snapping, marquee hit-testing, and audio mapping remain in absolute frequency space (getY + 'baseRows').
+This separation is intentional: it provides a relative visual guide while preserving absolute note data.
+*/
+
 export default function PianoRoll({ project, setProject, channelId }: PianoRollProps) {
   const channel = project.channels.find((c) => c.id === channelId);
   if (!channel) return <div>Channel not found</div>;
 
   // --- Pitch rows (use channel tuning) ---
   const [fundamental, setFundamental] = useState<Ratio | null>(null);
-  const tuningRows = channel.tuning.map((t) => fundamental?
-            {ratio:multiplyRatios(t.ratio, fundamental), name:t.name}:t);
+  // IMPORTANT: keep absolute tuning rows separate from the UI-shifted rows.
+  // - baseRows: absolute tuning used by notes/snapping/hit-testing
+  // - displayRows: relative-to-fundamental rows used only for rendering the grid/labels
+  const baseRows = channel.tuning;
+  const displayRows = useMemo(
+    () => (fundamental ? baseRows.map((t) => ({ ratio: multiplyRatios(t.ratio, fundamental), name: t.name })) : baseRows),
+    [baseRows, fundamental]
+  );
   const [minLog, maxLog] = useMemo(() => {
     return [Math.log(MIN_FREQ_HZ), Math.log(MAX_FREQ_HZ)] as const;
   }, []);
 
   // Map a ratio to a vertical unit position proportional to log(ratio),
   // normalized such that maxLog -> 0 (top) and minLog -> span (bottom).
+  // Maps an ABSOLUTE ratio to a vertical unit position (no fundamental applied).
+  // Intentional: notes, snapping, and hit-testing operate in absolute frequency space.
   const getY = (ratio: Ratio) => {
-    // Map absolute frequency into fixed log-Hz space [MIN_FREQ_HZ, MAX_FREQ_HZ]
-    // const rel = fundamental ? multiplyRatios(ratio, fundamental) : ratio;
     const freq = project.tuningRootHz * ratioToFloat(ratio);
     const val = Math.log(freq);
     const range = maxLog - minLog || 1;
     let scaled = (maxLog - val) / range; // 0..1 where higher freq is closer to 0 (top)
     if (scaled < 0) scaled = 0; else if (scaled > 1) scaled = 1;
-    const span = Math.max(tuningRows.length - 1, 1);
+    const span = Math.max(baseRows.length - 1, 1);
     return scaled * span;
   };
 
   // Find nearest tuning row given a Y pixel position; return snapped Y and the row's ratio
+  // Snap to the nearest ABSOLUTE tuning row (baseRows). Do not use displayRows here.
+  // Intentional: snapping remains absolute even when the grid is displayed relative to a fundamental.
   const findNearestRowByYPx = (yPx: number, rowPx: number): { y: number; ratio: Ratio } => {
-    if (tuningRows.length === 0) return { y: 0, ratio: { num: 1, den: 1 } };
+    if (baseRows.length === 0) return { y: 0, ratio: { num: 1, den: 1 } };
     let nearestIdx = 0;
     let best = Infinity;
-    tuningRows.forEach((t, idx) => {
+    baseRows.forEach((t, idx) => {
       const rowY = getY(t.ratio) * rowPx;
       const dy = Math.abs(rowY - yPx);
       if (dy < best) { best = dy; nearestIdx = idx; }
     });
-    const snappedY = getY(tuningRows[nearestIdx].ratio) * rowPx;
-    return { y: snappedY, ratio: tuningRows[nearestIdx].ratio };
+    const snappedY = getY(baseRows[nearestIdx].ratio) * rowPx;
+    return { y: snappedY, ratio: baseRows[nearestIdx].ratio };
   };
 
   // --- Selection ---
@@ -125,7 +139,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
 
     el.addEventListener("wheel", handler, { passive: false });
     return () => {
-      el.removeEventListener("wheel", handler as any);
+      el.removeEventListener("wheel", handler);
     };
   }, []);
 
@@ -150,7 +164,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
       }));
     };
 
-    const onUp = (e: MouseEvent) => {
+    const onUp = (_: MouseEvent) => {
       window.removeEventListener("mousemove", onMove, true);
       window.removeEventListener("mouseup", onUp, true);
       // Use the latest marqueeState for selection
@@ -184,10 +198,11 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
     window.addEventListener("mouseup", onUp, true);
   };
 
-  const onContextMenu = (e: React.MouseEvent, rowPx: number, noteHPx: number) => {
-    e.preventDefault();
-    if (!containerRef.current) return;
-    beginMarquee(e.clientX, e.clientY, rowPx, noteHPx);
+  const safeStop = (h?: { stop: () => void } | null) => {
+    try { h?.stop(); } catch { /* noop */ }
+  };
+  const safeSetRatio = (h: { setRatio?: (r: Ratio) => void } | null | undefined, r: Ratio) => {
+    try { h?.setRatio?.(r); } catch { /* noop */ }
   };
 
   // --- Timeline interaction ---
@@ -218,7 +233,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
       [...active.keys()].forEach((idx) => {
         if (!overlapped.has(idx)) {
           const h = active.get(idx)!;
-          try { h.stop(); } catch {}
+          safeStop(h);
           active.delete(idx);
         }
       });
@@ -235,7 +250,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
       window.removeEventListener("mousemove", onMove, true);
       window.removeEventListener("mouseup", onUp, true);
       // Stop any remaining active tones
-      active.forEach((h) => { try { h.stop(); } catch {} });
+      active.forEach((h) => { safeStop(h); });
       active.clear();
     };
     window.addEventListener("mousemove", onMove, true);
@@ -272,7 +287,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
   const totalBeats = Math.max(16, Math.ceil(Math.max(0, ...channel.notes.map((n) => n.start + n.duration))));
 
   const stopAllPlaybackTones = () => {
-    activePlaybackRef.current.forEach((h) => { try { h.stop(); } catch {} });
+    activePlaybackRef.current.forEach((h) => { safeStop(h); });
     activePlaybackRef.current.clear();
   };
 
@@ -326,7 +341,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
     Array.from(activePlaybackRef.current.keys()).forEach((idx) => {
       if (!overlapped.has(idx)) {
         const h = activePlaybackRef.current.get(idx)!;
-        try { h.stop(); } catch {}
+        safeStop(h);
         activePlaybackRef.current.delete(idx);
       }
     });
@@ -392,7 +407,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
         nearestStart.ratio,
         1
       );
-    } catch {}
+    } catch { /* noop */ }
 
     const onMove = (e: MouseEvent) => {
       const r = containerRef.current!.getBoundingClientRect();
@@ -401,18 +416,16 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
       const nearest = findNearestRowByYPx(e.clientY - r.top + st2, rowPx);
       // retune preview tone to nearest row while dragging
       const h = drawingPreviewRef.current;
-      if (h && h.setRatio) {
-        try { h.setRatio(nearest.ratio); } catch {}
-      }
+      safeSetRatio(h, nearest.ratio);
       setDrawing((d) => (d ? { ...d, endBeat: bx, ratio: nearest.ratio } : d));
     };
 
-    const onUp = (e: MouseEvent) => {
+    const onUp = (_: MouseEvent) => {
       window.removeEventListener("mousemove", onMove, true);
       window.removeEventListener("mouseup", onUp, true);
       // stop preview tone and commit note
       const preview = drawingPreviewRef.current;
-      if (preview) { try { preview.stop(); } catch {} }
+      safeStop(preview);
       drawingPreviewRef.current = null;
       setDrawing((d) => {
         if (!d) return null;
@@ -460,9 +473,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
   // --- Cleanup any active note previews on unmount ---
   useEffect(() => {
     return () => {
-      notePreviewHandles.current.forEach((h) => {
-        try { h.stop(); } catch {}
-      });
+      notePreviewHandles.current.forEach((h) => { safeStop(h); });
       notePreviewHandles.current.clear();
     };
   }, []);
@@ -482,13 +493,13 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
   // --- Layout sizes ---
   const beatPx = useMemo(() => (containerSize.width > 0 ? containerSize.width / totalBeats : DEFAULT_BEAT_PX), [containerSize.width, totalBeats]);
   const rowPx = useMemo(() => {
-    const rows = Math.max(tuningRows.length, 1);
+    const rows = Math.max(baseRows.length, 1);
     const base = containerSize.height > 0 ? containerSize.height / rows : DEFAULT_ROW_PX;
     return base * vZoom;
-  }, [containerSize.height, tuningRows.length, vZoom]);
+  }, [containerSize.height, baseRows.length, vZoom]);
   const noteHPx = Math.max(6, Math.min(32, rowPx * 0.6));
   const widthPx = containerSize.width || totalBeats * DEFAULT_BEAT_PX;
-  const heightPx = Math.max(tuningRows.length, 1) * rowPx;
+  const heightPx = Math.max(baseRows.length, 1) * rowPx;
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
@@ -575,7 +586,6 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
         className="relative border border-neutral-700 bg-neutral-800 rounded overflow-x-hidden overflow-y-auto flex-1 min-h-0"
         style={{ width: "100%", height: "100%" }}
         onContextMenu={(e) => {
-          // Prevent default context menu and start marquee selection
           e.preventDefault();
         }}
         onMouseDown={(e) => {
@@ -590,13 +600,10 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
         }}
       >
         <div className="relative" style={{ width: widthPx, height: heightPx }}>
-          {/* Horizontal pitch rows */}
-        {tuningRows.map((t) => {
-          // let theRatio = fundamental
-          //     ? multiplyRatios(t.ratio, fundamental)
-              // : t.ratio;
-              let theRatio = t.ratio;
-          const yPx = getY(theRatio) * rowPx;
+          {/* Horizontal pitch rows (displayed relative to fundamental via displayRows). */}
+        {displayRows.map((t) => {
+          const theRatio = t.ratio; // visual-only (may be fundamental-shifted)
+          const yPx = getY(theRatio) * rowPx; // still uses absolute mapping for placement
           const label = t.name ?? `${t.ratio.num}/${t.ratio.den}`;
           return (
             <React.Fragment key={t.name ?? `${theRatio.num}/${theRatio.den}`}>
@@ -693,10 +700,8 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
 
                     const stopOnce = () => {
                       const h = notePreviewHandles.current.get(i);
-                      if (h) {
-                        try { h.stop(); } catch {}
-                        notePreviewHandles.current.delete(i);
-                      }
+                      safeStop(h);
+                      notePreviewHandles.current.delete(i);
                       window.removeEventListener("mouseup", stopOnce, true);
                     };
                     window.addEventListener("mouseup", stopOnce, true);
@@ -748,9 +753,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
                 setDraggingPos({ x: snapX, y: snappedTop });
                 // Retune active preview while dragging
                 const hdl = notePreviewHandles.current.get(i);
-                if (hdl && hdl.setRatio) {
-                  try { hdl.setRatio(newRatio); } catch {}
-                }
+                safeSetRatio(hdl, newRatio);
               }}
               onDragStop={(e, d) => {
                 const newStart = Math.max(0, Math.round(d.x / (beatPx / 4)) / 4);
@@ -770,10 +773,8 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
                 dragYOffsetRef.current = null;
                 // Stop the preview started for drag if it wasn't started by a press
                 const h = notePreviewHandles.current.get(i);
-                if (h) {
-                  try { h.stop(); } catch {}
-                  notePreviewHandles.current.delete(i);
-                }
+                safeStop(h);
+                notePreviewHandles.current.delete(i);
               }}
               onResizeStop={(_, __, ref, ___, pos) => {
                 const snappedStart = Math.max(0, Math.round(pos.x / (beatPx / 4)) / 4);
