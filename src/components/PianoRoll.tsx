@@ -595,15 +595,23 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
           let theRatio = fundamental
               ? multiplyRatios(t.ratio, fundamental)
               : t.ratio;
+          const yPx = getY(theRatio) * rowPx;
+          const label = `${t.ratio.num}/${t.ratio.den}`;
           return (
-          <div
-            key={t.name ?? `${theRatio.num}/${theRatio.den}`}
-            className="absolute border-t border-neutral-700/50 text-xs text-neutral-500 pl-1 select-none"
-            style={{ top: getY(theRatio) * rowPx, left: 0, width: widthPx, height: 1 }}
-          >
-            {`${theRatio.num}/${theRatio.den}`}
-          </div>
-        )})}
+            <React.Fragment key={t.name ?? `${theRatio.num}/${theRatio.den}`}>
+              <div
+                className="absolute border-t border-neutral-700/50 pointer-events-none"
+                style={{ top: yPx, left: 0, width: widthPx, height: 0 }}
+              />
+              <div
+                className="absolute text-xs text-neutral-500 pl-1 select-none pointer-events-none"
+                style={{ top: yPx, left: 0, transform: 'translateY(-50%)' }}
+              >
+                {label}
+              </div>
+            </React.Fragment>
+          );
+        })}
 
         {/* Vertical beat lines */}
         {Array.from({ length: totalBeats + 1 }).map((_, i) => (
