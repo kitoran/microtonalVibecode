@@ -13,7 +13,6 @@ interface PianoRollProps {
 
 const DEFAULT_BEAT_PX = 48; // fallback pixels per beat
 const DEFAULT_ROW_PX = 32;  // fallback pixels per pitch row
-const DEFAULT_NOTE_H_PX = 10; // fallback note height in pixels
 
 // Fixed absolute frequency range for the piano roll vertical axis
 const MIN_FREQ_HZ = 30;
@@ -46,7 +45,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
   };
 
   // Find nearest tuning row given a Y pixel position; return snapped Y and the row's ratio
-  const findNearestRowByYPx = (yPx: number, rowPx: number, noteHPx: number): { y: number; ratio: Ratio } => {
+  const findNearestRowByYPx = (yPx: number, rowPx: number): { y: number; ratio: Ratio } => {
     if (tuningRows.length === 0) return { y: 0, ratio: { num: 1, den: 1 } };
     let nearestIdx = 0;
     let best = Infinity;
@@ -378,13 +377,13 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
 
   // --- Draw note interaction (left mouse drag on empty grid) ---
   const [drawing, setDrawing] = useState<null | { anchorBeat: number; endBeat: number; ratio: Ratio }>(null);
-  const beginDrawNote = (clientX: number, clientY: number, beatPx: number, rowPx: number, noteHPx: number) => {
+  const beginDrawNote = (clientX: number, clientY: number, beatPx: number, rowPx: number) => {
     if (!containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
     const st = containerRef.current.scrollTop;
     const snapBeat = (px: number) => Math.floor(px / (beatPx / 4)) / 4;
     const anchorBeat = snapBeat(clientX - rect.left);
-    const nearestStart = findNearestRowByYPx(clientY - rect.top + st, rowPx, noteHPx);
+    const nearestStart = findNearestRowByYPx(clientY - rect.top + st, rowPx);
     setDrawing({ anchorBeat, endBeat: anchorBeat, ratio: nearestStart.ratio });
     // start preview tone while drawing
     try {
@@ -399,7 +398,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
       const r = containerRef.current!.getBoundingClientRect();
       const st2 = containerRef.current!.scrollTop;
       const bx = Math.round(((e.clientX - r.left) / (beatPx / 4))) / 4;
-      const nearest = findNearestRowByYPx(e.clientY - r.top + st2, rowPx, noteHPx);
+      const nearest = findNearestRowByYPx(e.clientY - r.top + st2, rowPx);
       // retune preview tone to nearest row while dragging
       const h = drawingPreviewRef.current;
       if (h && h.setRatio) {
@@ -586,7 +585,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
             beginMarquee(e.clientX, e.clientY, rowPx, noteHPx);
           } else if (e.button === 0) {
             // Left mouse button: draw note interaction
-            beginDrawNote(e.clientX, e.clientY, beatPx, rowPx, noteHPx);
+            beginDrawNote(e.clientX, e.clientY, beatPx, rowPx);
           }
         }}
       >
@@ -738,11 +737,11 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
                   const rect = containerRef.current.getBoundingClientRect();
                   const st = containerRef.current.scrollTop;
                   const desiredTop = me.clientY - rect.top + st - (dragYOffsetRef.current ?? 0);
-                  const nearest = findNearestRowByYPx(desiredTop + noteHPx / 2, rowPx, noteHPx);
+                  const nearest = findNearestRowByYPx(desiredTop + noteHPx / 2, rowPx);
                   snappedTop = nearest.y - noteHPx / 2; // center to top
                   newRatio = nearest.ratio;
                 } else {
-                  const nearest = findNearestRowByYPx(d.y + noteHPx / 2, rowPx, noteHPx);
+                  const nearest = findNearestRowByYPx(d.y + noteHPx / 2, rowPx);
                   snappedTop = nearest.y - noteHPx / 2;
                   newRatio = nearest.ratio;
                 }
@@ -761,9 +760,9 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
                   const rect = containerRef.current.getBoundingClientRect();
                   const st = containerRef.current.scrollTop;
                   const desiredTop = me.clientY - rect.top + st - (dragYOffsetRef.current ?? 0);
-                  newRatio = findNearestRowByYPx(desiredTop + noteHPx / 2, rowPx, noteHPx).ratio;
+                  newRatio = findNearestRowByYPx(desiredTop + noteHPx / 2, rowPx ).ratio;
                 } else {
-                  newRatio = findNearestRowByYPx(d.y + noteHPx / 2, rowPx, noteHPx).ratio;
+                  newRatio = findNearestRowByYPx(d.y + noteHPx / 2, rowPx).ratio;
                 }
                 updateNote(i, { start: newStart, ratio: newRatio });
                 setDraggingNoteIndex(null);
