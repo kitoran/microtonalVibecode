@@ -68,6 +68,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
   const [playheadBeat, setPlayheadBeat] = useState<number>(0);
   const [timeSelection, setTimeSelection] = useState<{ start: number; end: number } | null>(null);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const [vZoom, setVZoom] = useState<number>(1);
   const rafIdRef = useRef<number | null>(null);
   const playbackStartMsRef = useRef<number>(0);
   const playbackStartBeatRef = useRef<number>(0);
@@ -102,6 +103,25 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
     const rect = el.getBoundingClientRect();
     setContainerSize({ width: rect.width, height: rect.height });
     return () => ro.disconnect();
+  }, []);
+
+  // Prevent Chrome page zoom on Ctrl+wheel and map it to vertical zoom instead
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    const handler = (e: WheelEvent) => {
+      if (e.ctrlKey) {
+        e.preventDefault();
+        const factor = Math.exp(-e.deltaY * 0.001);
+        setVZoom((z) => Math.max(0.25, Math.min(3, z * factor)));
+      }
+    };
+
+    el.addEventListener("wheel", handler, { passive: false });
+    return () => {
+      el.removeEventListener("wheel", handler as any);
+    };
   }, []);
 
   const beginMarquee = (clientX: number, clientY: number, rowPx: number, noteHPx: number) => {
@@ -454,11 +474,12 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
   const beatPx = useMemo(() => (containerSize.width > 0 ? containerSize.width / totalBeats : DEFAULT_BEAT_PX), [containerSize.width, totalBeats]);
   const rowPx = useMemo(() => {
     const rows = Math.max(tuningRows.length, 1);
-    return containerSize.height > 0 ? containerSize.height / rows : DEFAULT_ROW_PX;
-  }, [containerSize.height, tuningRows.length]);
-  const noteHPx = Math.max(6, Math.min(14, rowPx * 0.6));
+    const base = containerSize.height > 0 ? containerSize.height / rows : DEFAULT_ROW_PX;
+    return base * vZoom;
+  }, [containerSize.height, tuningRows.length, vZoom]);
+  const noteHPx = Math.max(6, Math.min(32, rowPx * 0.6));
   const widthPx = containerSize.width || totalBeats * DEFAULT_BEAT_PX;
-  const heightPx = containerSize.height || Math.max(tuningRows.length, 4) * DEFAULT_ROW_PX;
+  const heightPx = Math.max(tuningRows.length, 1) * rowPx;
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
