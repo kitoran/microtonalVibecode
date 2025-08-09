@@ -78,6 +78,8 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
   const [marquee, setMarquee] = useState<{ active: boolean; x: number; y: number; w: number; h: number }>(
     { active: false, x: 0, y: 0, w: 0, h: 0 }
   );
+  // Preview handle for drawing new notes
+  const drawingPreviewRef = useRef<{ stop: () => void; setRatio?: (r: Ratio) => void } | null>(null);
 
   // Track container size to compute dynamic layout (fit to screen)
   const [containerSize, setContainerSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
@@ -243,17 +245,34 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
     const anchorBeat = snapBeat(clientX - rect.left);
     const nearestStart = findNearestRowByYPx(clientY - rect.top, rowPx, noteHPx);
     setDrawing({ anchorBeat, endBeat: anchorBeat, ratio: nearestStart.ratio });
+    // start preview tone while drawing
+    try {
+      drawingPreviewRef.current = startTone(
+        project.tuningRootHz,
+        nearestStart.ratio,
+        1
+      );
+    } catch {}
 
     const onMove = (e: MouseEvent) => {
       const r = containerRef.current!.getBoundingClientRect();
       const bx = Math.round(((e.clientX - r.left) / (beatPx / 4))) / 4;
       const nearest = findNearestRowByYPx(e.clientY - r.top, rowPx, noteHPx);
+      // retune preview tone to nearest row while dragging
+      const h = drawingPreviewRef.current;
+      if (h && h.setRatio) {
+        try { h.setRatio(nearest.ratio); } catch {}
+      }
       setDrawing((d) => (d ? { ...d, endBeat: bx, ratio: nearest.ratio } : d));
     };
 
     const onUp = (e: MouseEvent) => {
       window.removeEventListener("mousemove", onMove, true);
       window.removeEventListener("mouseup", onUp, true);
+      // stop preview tone and commit note
+      const preview = drawingPreviewRef.current;
+      if (preview) { try { preview.stop(); } catch {} }
+      drawingPreviewRef.current = null;
       setDrawing((d) => {
         if (!d) return null;
         const start = Math.min(d.anchorBeat, d.endBeat);
