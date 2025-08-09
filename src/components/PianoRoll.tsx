@@ -234,30 +234,44 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
     window.addEventListener("mouseup", onUp, true);
   };
 
-  // --- Add note on empty left-click ---
-  const handleGridClick = (e: React.MouseEvent, beatPx: number, rowPx: number) => {
-    if ((e.target as HTMLElement).closest(".note")) return; // clicked a note
-    if (e.button !== 0) return; // only left click
-    const rect = containerRef.current!.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const yPx = e.clientY - rect.top;
-    const start = Math.floor(x / (beatPx / 4)) / 4;
-    const yUnits = yPx / rowPx;
-    let nearestIdx = 0;
-    let best = Infinity;
-    tuningRows.forEach((t, idx) => {
-      const dy = Math.abs(getY(t.ratio) - yUnits);
-      if (dy < best) { best = dy; nearestIdx = idx; }
-    });
-    const ratio = tuningRows[nearestIdx]?.ratio || { num: 1, den: 1 };
+  // --- Draw note interaction (left mouse drag on empty grid) ---
+  const [drawing, setDrawing] = useState<null | { anchorBeat: number; endBeat: number; ratio: Ratio }>(null);
+  const beginDrawNote = (clientX: number, clientY: number, beatPx: number, rowPx: number, noteHPx: number) => {
+    if (!containerRef.current) return;
+    const rect = containerRef.current.getBoundingClientRect();
+    const snapBeat = (px: number) => Math.floor(px / (beatPx / 4)) / 4;
+    const anchorBeat = snapBeat(clientX - rect.left);
+    const nearestStart = findNearestRowByYPx(clientY - rect.top, rowPx, noteHPx);
+    setDrawing({ anchorBeat, endBeat: anchorBeat, ratio: nearestStart.ratio });
 
-    const newNote: Note = { start, duration: 1, ratio, velocity: 1.0 };
-    setProject({
-      ...project,
-      channels: project.channels.map((ch) =>
-        ch.id === channelId ? { ...ch, notes: [...ch.notes, newNote] } : ch
-      ),
-    });
+    const onMove = (e: MouseEvent) => {
+      const r = containerRef.current!.getBoundingClientRect();
+      const bx = Math.round(((e.clientX - r.left) / (beatPx / 4))) / 4;
+      const nearest = findNearestRowByYPx(e.clientY - r.top, rowPx, noteHPx);
+      setDrawing((d) => (d ? { ...d, endBeat: bx, ratio: nearest.ratio } : d));
+    };
+
+    const onUp = (e: MouseEvent) => {
+      window.removeEventListener("mousemove", onMove, true);
+      window.removeEventListener("mouseup", onUp, true);
+      setDrawing((d) => {
+        if (!d) return null;
+        const start = Math.min(d.anchorBeat, d.endBeat);
+        const durRaw = Math.abs(d.endBeat - d.anchorBeat);
+        const duration = durRaw < 0.01 ? 1 : Math.max(0.25, Math.round((durRaw) * 4) / 4);
+        const newNote: Note = { start, duration, ratio: d.ratio, velocity: 1.0 };
+        setProject({
+          ...project,
+          channels: project.channels.map((ch) =>
+            ch.id === channelId ? { ...ch, notes: [...ch.notes, newNote] } : ch
+          ),
+        });
+        return null;
+      });
+    };
+
+    window.addEventListener("mousemove", onMove, true);
+    window.addEventListener("mouseup", onUp, true);
   };
 
   // --- Delete selected notes ---
@@ -380,12 +394,13 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
           e.preventDefault();
         }}
         onMouseDown={(e) => {
+          if ((e.target as HTMLElement).closest(".note")) return; // ignore clicks on notes
           if (e.button === 2) {
             // Right mouse button starts marquee selection
             beginMarquee(e.clientX, e.clientY, rowPx, noteHPx);
           } else if (e.button === 0) {
-            // Left mouse button: normal grid click (add note)
-            handleGridClick(e, beatPx, rowPx);
+            // Left mouse button: draw note interaction
+            beginDrawNote(e.clientX, e.clientY, beatPx, rowPx, noteHPx);
           }
         }}
       >
@@ -420,6 +435,19 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
               top: 0,
               width: Math.max(0, (timeSelection.end - timeSelection.start)) * beatPx,
               height: heightPx,
+            }}
+          />
+        )}
+
+        {/* Drawing note preview */}
+        {drawing && (
+          <div
+            className="absolute bg-blue-500/70 ring-2 ring-blue-200 pointer-events-none"
+            style={{
+              left: Math.min(drawing.anchorBeat, drawing.endBeat) * beatPx,
+              width: Math.max(beatPx / 4, Math.abs(drawing.endBeat - drawing.anchorBeat) * beatPx),
+              top: getY(drawing.ratio) * rowPx - noteHPx / 2,
+              height: noteHPx,
             }}
           />
         )}
