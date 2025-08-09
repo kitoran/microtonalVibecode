@@ -1,6 +1,6 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { Project, Note, Ratio } from "../model/project";
-import { divideRatios, multiplyRatios } from "../utils/ratio";
+import { divideRatios, multiplyRatios, ratioToFloat } from "../utils/ratio";
 import { playTone, startTone } from "../audio/engine";
 import { Rnd } from "react-rnd";
 import { connectSeries } from "tone";
@@ -15,6 +15,10 @@ const DEFAULT_BEAT_PX = 48; // fallback pixels per beat
 const DEFAULT_ROW_PX = 32;  // fallback pixels per pitch row
 const DEFAULT_NOTE_H_PX = 10; // fallback note height in pixels
 
+// Fixed absolute frequency range for the piano roll vertical axis
+const MIN_FREQ_HZ = 30;
+const MAX_FREQ_HZ = 3000;
+
 export default function PianoRoll({ project, setProject, channelId }: PianoRollProps) {
   const channel = project.channels.find((c) => c.id === channelId);
   if (!channel) return <div>Channel not found</div>;
@@ -23,21 +27,19 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
   const tuningRows = channel.tuning;
   const [fundamental, setFundamental] = useState<Ratio | null>(null);
   const [minLog, maxLog] = useMemo(() => {
-    if (tuningRows.length === 0) return [0, 1] as const;
-    const logs = tuningRows.map((t) => {
-      const r = fundamental ? multiplyRatios(t.ratio, fundamental) : t.ratio;
-      return Math.log(r.num / r.den);
-    });
-    return [Math.min(...logs), Math.max(...logs)] as const;
-  }, [tuningRows, fundamental]);
+    return [Math.log(MIN_FREQ_HZ), Math.log(MAX_FREQ_HZ)] as const;
+  }, []);
 
   // Map a ratio to a vertical unit position proportional to log(ratio),
   // normalized such that maxLog -> 0 (top) and minLog -> span (bottom).
   const getY = (ratio: Ratio) => {
-    const rel = fundamental ? divideRatios(ratio, fundamental) : ratio;
-    const val = Math.log(rel.num / rel.den);
+    // Map absolute frequency into fixed log-Hz space [MIN_FREQ_HZ, MAX_FREQ_HZ]
+    // const rel = fundamental ? multiplyRatios(ratio, fundamental) : ratio;
+    const freq = project.tuningRootHz * ratioToFloat(ratio);
+    const val = Math.log(freq);
     const range = maxLog - minLog || 1;
-    const scaled = (maxLog - val) / range; // 0..1 where larger ratio is closer to 0 (top)
+    let scaled = (maxLog - val) / range; // 0..1 where higher freq is closer to 0 (top)
+    if (scaled < 0) scaled = 0; else if (scaled > 1) scaled = 1;
     const span = Math.max(tuningRows.length - 1, 1);
     return scaled * span;
   };
