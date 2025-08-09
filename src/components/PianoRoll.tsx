@@ -12,6 +12,7 @@ interface PianoRollProps {
 
 const DEFAULT_BEAT_PX = 48; // fallback pixels per beat
 const DEFAULT_ROW_PX = 32;  // fallback pixels per pitch row
+const QUARTER_BEAT = 0.25;
 
 // Fixed absolute frequency range for the piano roll vertical axis
 const MIN_FREQ_HZ = 30;
@@ -209,7 +210,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
   const beginPlayheadDrag = (clientX: number) => {
     if (!timelineRef.current) return;
     const rect = timelineRef.current.getBoundingClientRect();
-    const snap = (xPx: number) => Math.max(0, Math.round((xPx / (beatPx / 4))) / 4);
+    const snap = (xPx: number) => snapBeatToQuarter(pxToBeats(xPx));
 
     const active = new Map<number, { stop: () => void }>();
 
@@ -260,7 +261,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
   const beginTimeSelection = (clientX: number) => {
     if (!timelineRef.current) return;
     const rect = timelineRef.current.getBoundingClientRect();
-    const snap = (xPx: number) => Math.max(0, Math.round((xPx / (beatPx / 4))) / 4);
+    const snap = (xPx: number) => snapBeatToQuarter(pxToBeats(xPx));
     const anchorBeat = snap(clientX - rect.left);
     let moved = false;
 
@@ -392,11 +393,11 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
 
   // --- Draw note interaction (left mouse drag on empty grid) ---
   const [drawing, setDrawing] = useState<null | { anchorBeat: number; endBeat: number; ratio: Ratio }>(null);
-  const beginDrawNote = (clientX: number, clientY: number, beatPx: number, rowPx: number) => {
+  const beginDrawNote = (clientX: number, clientY: number, rowPx: number) => {
     if (!containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
     const st = containerRef.current.scrollTop;
-    const snapBeat = (px: number) => Math.floor(px / (beatPx / 4)) / 4;
+    const snapBeat = (px: number) => floorBeatToQuarter(pxToBeats(px));
     const anchorBeat = snapBeat(clientX - rect.left);
     const nearestStart = findNearestRowByYPx(clientY - rect.top + st, rowPx);
     setDrawing({ anchorBeat, endBeat: anchorBeat, ratio: nearestStart.ratio });
@@ -412,7 +413,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
     const onMove = (e: MouseEvent) => {
       const r = containerRef.current!.getBoundingClientRect();
       const st2 = containerRef.current!.scrollTop;
-      const bx = Math.round(((e.clientX - r.left) / (beatPx / 4))) / 4;
+      const bx = snapBeatToQuarter(pxToBeats(e.clientX - r.left));
       const nearest = findNearestRowByYPx(e.clientY - r.top + st2, rowPx);
       // retune preview tone to nearest row while dragging
       const h = drawingPreviewRef.current;
@@ -431,7 +432,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
         if (!d) return null;
         const start = Math.min(d.anchorBeat, d.endBeat);
         const durRaw = Math.abs(d.endBeat - d.anchorBeat);
-        const duration = durRaw < 0.01 ? 1 : Math.max(0.25, Math.round((durRaw) * 4) / 4);
+        const duration = durRaw < 0.01 ? 1 : Math.max(QUARTER_BEAT, snapBeatToQuarter(durRaw));
         const newNote: Note = { start, duration, ratio: d.ratio, velocity: 1.0 };
         setProject({
           ...project,
@@ -497,6 +498,11 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
     const base = containerSize.height > 0 ? containerSize.height / rows : DEFAULT_ROW_PX;
     return base * vZoom;
   }, [containerSize.height, baseRows.length, vZoom]);
+  const quarterBeatPx = useMemo(() => beatPx * QUARTER_BEAT, [beatPx]);
+  const pxToBeats = (px: number) => px / beatPx;
+  const snapBeatToQuarter = (beats: number) => Math.max(0, Math.round(beats / QUARTER_BEAT) * QUARTER_BEAT);
+  const floorBeatToQuarter = (beats: number) => Math.floor(beats / QUARTER_BEAT) * QUARTER_BEAT;
+  const snapPxToQuarterGrid = (px: number) => Math.round(px / quarterBeatPx) * quarterBeatPx;
   const noteHPx = Math.max(6, Math.min(32, rowPx * 0.6));
   const widthPx = containerSize.width || totalBeats * DEFAULT_BEAT_PX;
   const heightPx = Math.max(baseRows.length, 1) * rowPx;
@@ -595,7 +601,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
             beginMarquee(e.clientX, e.clientY, rowPx, noteHPx);
           } else if (e.button === 0) {
             // Left mouse button: draw note interaction
-            beginDrawNote(e.clientX, e.clientY, beatPx, rowPx);
+            beginDrawNote(e.clientX, e.clientY, rowPx);
           }
         }}
       >
@@ -649,7 +655,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
             className="absolute bg-blue-500/70 ring-2 ring-blue-200 pointer-events-none"
             style={{
               left: Math.min(drawing.anchorBeat, drawing.endBeat) * beatPx,
-              width: Math.max(beatPx / 4, Math.abs(drawing.endBeat - drawing.anchorBeat) * beatPx),
+              width: Math.max(quarterBeatPx, Math.abs(drawing.endBeat - drawing.anchorBeat) * beatPx),
               top: getY(drawing.ratio) * rowPx - noteHPx / 2,
               height: noteHPx,
             }}
@@ -660,7 +666,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
         {channel.notes.map((note, i) => {
           const x = note.start * beatPx;
           const yCenter = getY(note.ratio) * rowPx;
-          const w = Math.max(0.25 * beatPx, note.duration * beatPx);
+          const w = Math.max(quarterBeatPx, note.duration * beatPx);
           const h = noteHPx;
           const y = yCenter - h / 2; // top
           const isSel = selected.has(i);
@@ -679,8 +685,8 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
               size={{ width: w, height: h }}
               dragAxis="both"
               enableResizing={{ left: true, right: true, top: false, bottom: false }}
-              dragGrid={[beatPx / 4, 1]}
-              resizeGrid={[beatPx / 4, rowPx]}
+              dragGrid={[quarterBeatPx, 1]}
+              resizeGrid={[quarterBeatPx, rowPx]}
               onMouseDown={(e) => {
                 const me = e as MouseEvent;
                 // Middle click sets fundamental
@@ -734,7 +740,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
                 }
               }}
               onDrag={(e, d) => {
-                const snapX = Math.round(d.x / (beatPx / 4)) * (beatPx / 4);
+                const snapX = snapPxToQuarterGrid(d.x);
                 let snappedTop = d.y;
                 let newRatio = note.ratio;
                 if (containerRef.current) {
@@ -756,7 +762,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
                 safeSetRatio(hdl, newRatio);
               }}
               onDragStop={(e, d) => {
-                const newStart = Math.max(0, Math.round(d.x / (beatPx / 4)) / 4);
+                const newStart = snapBeatToQuarter(pxToBeats(d.x));
                 let newRatio = note.ratio;
                 if (containerRef.current) {
                   const me = e as MouseEvent;
@@ -777,8 +783,8 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
                 notePreviewHandles.current.delete(i);
               }}
               onResizeStop={(_, __, ref, ___, pos) => {
-                const snappedStart = Math.max(0, Math.round(pos.x / (beatPx / 4)) / 4);
-                const snappedDur = Math.max(0.25, Math.round(ref.offsetWidth / (beatPx / 4)) / 4);
+                const snappedStart = snapBeatToQuarter(pxToBeats(pos.x));
+                const snappedDur = Math.max(QUARTER_BEAT, snapBeatToQuarter(pxToBeats(ref.offsetWidth)));
                 updateNote(i, { start: snappedStart, duration: snappedDur });
               }}
               className={`note absolute px-1 flex items-center text-xs select-none ${
