@@ -24,8 +24,9 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
   if (!channel) return <div>Channel not found</div>;
 
   // --- Pitch rows (use channel tuning) ---
-  const tuningRows = channel.tuning;
   const [fundamental, setFundamental] = useState<Ratio | null>(null);
+  const tuningRows = channel.tuning.map((t) => fundamental?
+            {ratio:multiplyRatios(t.ratio, fundamental), name:t.name}:t);
   const [minLog, maxLog] = useMemo(() => {
     return [Math.log(MIN_FREQ_HZ), Math.log(MAX_FREQ_HZ)] as const;
   }, []);
@@ -592,11 +593,12 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
         <div className="relative" style={{ width: widthPx, height: heightPx }}>
           {/* Horizontal pitch rows */}
         {tuningRows.map((t) => {
-          let theRatio = fundamental
-              ? multiplyRatios(t.ratio, fundamental)
-              : t.ratio;
+          // let theRatio = fundamental
+          //     ? multiplyRatios(t.ratio, fundamental)
+              // : t.ratio;
+              let theRatio = t.ratio;
           const yPx = getY(theRatio) * rowPx;
-          const label = `${t.ratio.num}/${t.ratio.den}`;
+          const label = t.name ?? `${t.ratio.num}/${t.ratio.den}`;
           return (
             <React.Fragment key={t.name ?? `${theRatio.num}/${theRatio.den}`}>
               <div

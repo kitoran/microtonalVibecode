@@ -13,7 +13,8 @@ export const exampleProject: Project = {
       instrument: "sine",
       volume: 1,
       pan: 0,
-      tuning: (() => {
+      tuning: 
+      (() => {
         const list: { name?: string; ratio: { num: number; den: number } }[] = [];
         const gcd = (a: number, b: number): number => {
           while (b !== 0) {
@@ -26,7 +27,7 @@ export const exampleProject: Project = {
         for (let num = 1; num <= 9; num++) {
           for (let den = 1; den <= 9; den++) {
             if (gcd(num, den) === 1) {
-              list.push({ ratio: { num, den } });
+              list.push({name: `${num}/${den}`, ratio: { num, den } });
             }
           }
         }

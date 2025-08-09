@@ -1,8 +1,10 @@
 import type { Ratio } from "../model/project";
 
 export function simplifyRatio({ num, den }: Ratio): Ratio {
-  const gcd = (a: number, b: number): number =>
-    b === 0 ? a : gcd(b, a % b);
+  const gcd = (a: number, b: number): number => {
+    // console.log("gcd", a, b);
+    return b === 0 ? a : gcd(b, a % b);
+  }
 
   const g = gcd(num, den);
   return { num: num / g, den: den / g };
