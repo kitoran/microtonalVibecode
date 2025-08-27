@@ -27,7 +27,7 @@ This separation is intentional: it provides a relative visual guide while preser
 
 export default function PianoRoll({ project, setProject, channelId }: PianoRollProps) {
   const channel = project.channels.find((c) => c.id === channelId);
-  if (!channel) return <div>Channel not found</div>;
+  if (!channel) return <div>Channel not found :(</div>;
 
   // --- Pitch rows (use channel tuning) ---
   const [fundamental, setFundamental] = useState<Ratio | null>(null);
