@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { Project, Note, Ratio } from "../model/project";
+import { type Project, type Note, type Ratio, ratioToString } from "../model/project";
 import { divideRatios, multiplyRatios, ratioToFloat } from "../utils/ratio";
 import { playTone, startTone } from "../audio/engine";
 import { Rnd } from "react-rnd";
@@ -612,9 +612,9 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
         {displayRows.map((t) => {
           const theRatio = t.ratio; // visual-only (may be fundamental-shifted)
           const yPx = getY(theRatio) * rowPx; // still uses absolute mapping for placement
-          const label = t.name ?? `${t.ratio.num}/${t.ratio.den}`;
+          const label = t.name ?? ratioToString(t.ratio);
           return (
-            <React.Fragment key={t.name ?? `${theRatio.num}/${theRatio.den}`}>
+            <React.Fragment key={t.name ?? ratioToString(theRatio)}>
               <div
                 className="absolute border-t border-neutral-700/50 pointer-events-none"
                 style={{ top: yPx, left: 0, width: widthPx, height: 0 }}
@@ -796,7 +796,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
                   ? "bg-blue-400 ring-2 ring-blue-200 text-white"
                   : "bg-blue-600 hover:bg-blue-500 text-white"
               }`}
-              title={`start=${note.start} dur=${note.duration}`}
+              title={`start=${note.start} dur=${note.duration} r=${note.ratio}`}
               onDoubleClick={() =>
                 playTone(project.tuningRootHz, note.ratio, note.duration, note.velocity)
               }

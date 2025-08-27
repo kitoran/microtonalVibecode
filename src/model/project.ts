@@ -3,7 +3,9 @@ export interface Ratio {
   num: number;
   den: number;
 }
-
+export function ratioToString(r:Ratio) {
+    return `${r.num}/${r.den}`
+}
 /** A musical note event */
 export interface Note {
   start: number;         // In beats
