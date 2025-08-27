@@ -3,10 +3,10 @@ import { type Project, type Note, type Ratio, ratioToString } from "../model/pro
 import { divideRatios, multiplyRatios, ratioToFloat } from "../utils/ratio";
 import { playTone, startTone } from "../audio/engine";
 import { Rnd } from "react-rnd";
- 
+import { useProject } from "../ProjectContext";
 interface PianoRollProps {
-  project: Project;
-  setProject: (p: Project) => void;
+  // project: Project;
+  // setProject: (p: Project) => void;
   channelId: string;
 }
 
@@ -25,7 +25,8 @@ Design note (intentional):
 This separation is intentional: it provides a relative visual guide while preserving absolute note data.
 */
 
-export default function PianoRoll({ project, setProject, channelId }: PianoRollProps) {
+export default function PianoRoll({ channelId }: PianoRollProps) {
+  const { project, setProject } = useProject();
   const channel = project.channels.find((c) => c.id === channelId);
   if (!channel) return <div>Channel not found</div>;
 
@@ -83,7 +84,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
       return next;
     });
 
-  
+
   // --- Transport / timeline state ---
   const [playheadBeat, setPlayheadBeat] = useState<number>(0);
   const [timeSelection, setTimeSelection] = useState<{ start: number; end: number } | null>(null);
@@ -393,62 +394,79 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
     };
   }, []);
 
-  // --- Draw note interaction (left mouse drag on empty grid) ---
-  const [drawing, setDrawing] = useState<null | { anchorBeat: number; endBeat: number; ratio: Ratio }>(null);
-  const beginDrawNote = (clientX: number, clientY: number, rowPx: number) => {
+// --- Draw note interaction (left mouse drag on empty grid) ---
+const [drawing, setDrawing] = useState<null | { anchorBeat: number; endBeat: number; ratio: Ratio }>(null);
+
+const beginDrawNote = (clientX: number, clientY: number, rowPx: number) => {
+  if (!containerRef.current) return;
+  const rect = containerRef.current.getBoundingClientRect();
+  const st = containerRef.current.scrollTop;
+
+  const snapBeat = (px: number) => floorBeatToQuarter(pxToBeats(px));
+  const anchorBeat = snapBeat(clientX - rect.left);
+
+  const nearestStart = findNearestRowByYPx(clientY - rect.top + st, rowPx);
+  setDrawing({ anchorBeat, endBeat: anchorBeat, ratio: nearestStart.ratio });
+
+  // start preview tone while drawing
+  try {
+    drawingPreviewRef.current = startTone(project.tuningRootHz, nearestStart.ratio, 1);
+  } catch {}
+
+  const onMove = (e: MouseEvent) => {
     if (!containerRef.current) return;
-    const rect = containerRef.current.getBoundingClientRect();
-    const st = containerRef.current.scrollTop;
-    const snapBeat = (px: number) => floorBeatToQuarter(pxToBeats(px));
-    const anchorBeat = snapBeat(clientX - rect.left);
-    const nearestStart = findNearestRowByYPx(clientY - rect.top + st, rowPx);
-    setDrawing({ anchorBeat, endBeat: anchorBeat, ratio: nearestStart.ratio });
-    // start preview tone while drawing
-    try {
-      drawingPreviewRef.current = startTone(
-        project.tuningRootHz,
-        nearestStart.ratio,
-        1
-      );
-    } catch { /* noop */ }
+    const r = containerRef.current.getBoundingClientRect();
+    const st2 = containerRef.current.scrollTop;
+    const bx = snapBeatToQuarter(pxToBeats(e.clientX - r.left));
+    const nearest = findNearestRowByYPx(e.clientY - r.top + st2, rowPx);
 
-    const onMove = (e: MouseEvent) => {
-      const r = containerRef.current!.getBoundingClientRect();
-      const st2 = containerRef.current!.scrollTop;
-      const bx = snapBeatToQuarter(pxToBeats(e.clientX - r.left));
-      const nearest = findNearestRowByYPx(e.clientY - r.top + st2, rowPx);
-      // retune preview tone to nearest row while dragging
-      const h = drawingPreviewRef.current;
-      safeSetRatio(h, nearest.ratio);
-      setDrawing((d) => (d ? { ...d, endBeat: bx, ratio: nearest.ratio } : d));
-    };
+    // retune preview tone to nearest row while dragging
+    safeSetRatio(drawingPreviewRef.current, nearest.ratio);
 
-    const onUp = (_: MouseEvent) => {
-      window.removeEventListener("mousemove", onMove, true);
-      window.removeEventListener("mouseup", onUp, true);
-      // stop preview tone and commit note
-      const preview = drawingPreviewRef.current;
-      safeStop(preview);
-      drawingPreviewRef.current = null;
-      setDrawing((d) => {
-        if (!d) return null;
-        const start = Math.min(d.anchorBeat, d.endBeat);
-        const durRaw = Math.abs(d.endBeat - d.anchorBeat);
-        const duration = durRaw < 0.01 ? 1 : Math.max(QUARTER_BEAT, snapBeatToQuarter(durRaw));
-        const newNote: Note = { start, duration, ratio: d.ratio, velocity: 1.0 };
-        setProject({
-          ...project,
-          channels: project.channels.map((ch) =>
-            ch.id === channelId ? { ...ch, notes: [...ch.notes, newNote] } : ch
-          ),
-        });
-        return null;
-      });
-    };
-
-    window.addEventListener("mousemove", onMove, true);
-    window.addEventListener("mouseup", onUp, true);
+    setDrawing((d) => (d ? { ...d, endBeat: bx, ratio: nearest.ratio } : d));
   };
+
+  const onUp = (_: MouseEvent) => {
+    window.removeEventListener("mousemove", onMove, true);
+    window.removeEventListener("mouseup", onUp, true);
+
+    // stop preview tone
+    const preview = drawingPreviewRef.current;
+    safeStop(preview);
+    drawingPreviewRef.current = null;
+
+    // compute note once, then clear drawing and update project separately
+    let created: Note | null = null;
+    setDrawing((d) => {
+      console.log("SETDrawing", d);
+      if (!d) return null;
+      const start = Math.min(d.anchorBeat, d.endBeat);
+      const durRaw = Math.abs(d.endBeat - d.anchorBeat);
+      const duration = durRaw < 0.01 ? 1 : Math.max(QUARTER_BEAT, snapBeatToQuarter(durRaw));
+      created = { start, duration, ratio: d.ratio, velocity: 1.0 };
+      //return null; // clear the ghost
+      
+      console.log("after set drawing, created=", created);
+      if (created) {
+        console.log("created");
+        setProject((prev) => {
+          let res = {
+            ...prev,
+            channels: prev.channels.map((ch) =>
+              ch.id === channelId ? { ...ch, notes: [...ch.notes, created!] } : ch
+            ),
+          };
+          console.log(res);
+        
+        });
+      }
+    });
+  };
+
+  window.addEventListener("mousemove", onMove, true);
+  window.addEventListener("mouseup", onUp, true);
+};
+
 
   // --- Delete selected notes ---
   useEffect(() => {
@@ -609,95 +627,122 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
       >
         <div className="relative" style={{ width: widthPx, height: heightPx }}>
           {/* Horizontal pitch rows (displayed relative to fundamental via displayRows). */}
-        {displayRows.map((t) => {
-          const theRatio = t.ratio; // visual-only (may be fundamental-shifted)
-          const yPx = getY(theRatio) * rowPx; // still uses absolute mapping for placement
-          const label = t.name ?? ratioToString(t.ratio);
-          return (
-            <React.Fragment key={t.name ?? ratioToString(theRatio)}>
-              <div
-                className="absolute border-t border-neutral-700/50 pointer-events-none"
-                style={{ top: yPx, left: 0, width: widthPx, height: 0 }}
-              />
-              <div
-                className="absolute text-xs text-neutral-500 pl-1 select-none pointer-events-none"
-                style={{ top: yPx, left: 0, transform: 'translateY(-50%)' }}
-              >
-                {label}
-              </div>
-            </React.Fragment>
-          );
-        })}
+          {displayRows.map((t) => {
+            const theRatio = t.ratio; // visual-only (may be fundamental-shifted)
+            const yPx = getY(theRatio) * rowPx; // still uses absolute mapping for placement
+            const label = t.name ?? ratioToString(t.ratio);
+            return (
+              <React.Fragment key={t.name ?? ratioToString(theRatio)}>
+                <div
+                  className="absolute border-t border-neutral-700/50 pointer-events-none"
+                  style={{ top: yPx, left: 0, width: widthPx, height: 0 }}
+                />
+                <div
+                  className="absolute text-xs text-neutral-500 pl-1 select-none pointer-events-none"
+                  style={{ top: yPx, left: 0, transform: 'translateY(-50%)' }}
+                >
+                  {label}
+                </div>
+              </React.Fragment>
+            );
+          })}
 
-        {/* Vertical beat lines */}
-        {Array.from({ length: totalBeats + 1 }).map((_, i) => (
-          <div
-            key={`v-${i}`}
-            className={`absolute ${i % 4 === 0 ? "border-l-neutral-600/70" : "border-l-neutral-700/40"}`}
-            style={{ left: i * beatPx, top: 0, height: heightPx, borderLeftWidth: 1 }}
-          />
-        ))}
+          {/* Vertical beat lines */}
+          {Array.from({ length: totalBeats + 1 }).map((_, i) => (
+            <div
+              key={`v-${i}`}
+              className={`absolute ${i % 4 === 0 ? "border-l-neutral-600/70" : "border-l-neutral-700/40"}`}
+              style={{ left: i * beatPx, top: 0, height: heightPx, borderLeftWidth: 1 }}
+            />
+          ))}
 
-        {/* Time selection overlay (grid) */}
-        {timeSelection && (
-          <div
-            className="absolute pointer-events-none bg-blue-400/10"
-            style={{
-              left: timeSelection.start * beatPx,
-              top: 0,
-              width: Math.max(0, (timeSelection.end - timeSelection.start)) * beatPx,
-              height: heightPx,
-            }}
-          />
-        )}
+          {/* Time selection overlay (grid) */}
+          {timeSelection && (
+            <div
+              className="absolute pointer-events-none bg-blue-400/10"
+              style={{
+                left: timeSelection.start * beatPx,
+                top: 0,
+                width: Math.max(0, (timeSelection.end - timeSelection.start)) * beatPx,
+                height: heightPx,
+              }}
+            />
+          )}
 
-        {/* Drawing note preview */}
-        {drawing && (
-          <div
-            className="absolute bg-blue-500/70 ring-2 ring-blue-200 pointer-events-none"
-            style={{
-              left: Math.min(drawing.anchorBeat, drawing.endBeat) * beatPx,
-              width: Math.max(quarterBeatPx, Math.abs(drawing.endBeat - drawing.anchorBeat) * beatPx),
-              top: getY(drawing.ratio) * rowPx - noteHPx / 2,
-              height: noteHPx,
-            }}
-          />
-        )}
+          {/* Drawing note preview */}
+          {drawing && (
+            <div
+              className="absolute bg-blue-500/70 ring-2 ring-blue-200 pointer-events-none"
+              style={{
+                left: Math.min(drawing.anchorBeat, drawing.endBeat) * beatPx,
+                width: Math.max(quarterBeatPx, Math.abs(drawing.endBeat - drawing.anchorBeat) * beatPx),
+                top: getY(drawing.ratio) * rowPx - noteHPx / 2,
+                height: noteHPx,
+              }}
+            />
+          )}
 
-        {/* Notes */}
-        {channel.notes.map((note, i) => {
-          const x = note.start * beatPx;
-          const yCenter = getY(note.ratio) * rowPx;
-          const w = Math.max(quarterBeatPx, note.duration * beatPx);
-          const h = noteHPx;
-          const y = yCenter - h / 2; // top
-          const isSel = selected.has(i);
-          const isFundamental = fundamental
-            ? (() => {
+          {/* Notes */}
+          {channel.notes.map((note, i) => {
+            const x = note.start * beatPx;
+            const yCenter = getY(note.ratio) * rowPx;
+            const w = Math.max(quarterBeatPx, note.duration * beatPx);
+            const h = noteHPx;
+            const y = yCenter - h / 2; // top
+            const isSel = selected.has(i);
+            const isFundamental = fundamental
+              ? (() => {
                 const rel = divideRatios(note.ratio, fundamental);
                 return rel.num === rel.den;
               })()
-            : false;
+              : false;
 
-          return (
-            <Rnd
-              key={i}
-              bounds="parent"
-              position={{ x: i === draggingNoteIndex && draggingPos ? draggingPos.x : x, y: i === draggingNoteIndex && draggingPos ? draggingPos.y : y }}
-              size={{ width: w, height: h }}
-              dragAxis="both"
-              enableResizing={{ left: true, right: true, top: false, bottom: false }}
-              dragGrid={[quarterBeatPx, 1]}
-              resizeGrid={[quarterBeatPx, rowPx]}
-              onMouseDown={(e) => {
-                const me = e as MouseEvent;
-                // Middle click sets fundamental
-                if (me.button === 1) {
-                  e.preventDefault();
-                  setFundamental(note.ratio);
-                }
-                // Left click: start preview tone until mouse is released
-                if (me.button === 0) {
+            return (
+              <Rnd
+                key={i}
+                bounds="parent"
+                position={{ x: i === draggingNoteIndex && draggingPos ? draggingPos.x : x, y: i === draggingNoteIndex && draggingPos ? draggingPos.y : y }}
+                size={{ width: w, height: h }}
+                dragAxis="both"
+                enableResizing={{ left: true, right: true, top: false, bottom: false }}
+                dragGrid={[quarterBeatPx, 1]}
+                resizeGrid={[quarterBeatPx, rowPx]}
+                onMouseDown={(e) => {
+                  const me = e as MouseEvent;
+                  // Middle click sets fundamental
+                  if (me.button === 1) {
+                    e.preventDefault();
+                    setFundamental(note.ratio);
+                  }
+                  // Left click: start preview tone until mouse is released
+                  if (me.button === 0) {
+                    if (!notePreviewHandles.current.has(i)) {
+                      const handle = startTone(
+                        project.tuningRootHz,
+                        note.ratio,
+                        Math.max(0, Math.min(1, note.velocity))
+                      );
+                      notePreviewHandles.current.set(i, handle);
+
+                      const stopOnce = () => {
+                        const h = notePreviewHandles.current.get(i);
+                        safeStop(h);
+                        notePreviewHandles.current.delete(i);
+                        window.removeEventListener("mouseup", stopOnce, true);
+                      };
+                      window.addEventListener("mouseup", stopOnce, true);
+                    }
+                  }
+                }}
+                onDragStart={(e) => {
+                  const me = e as MouseEvent;
+                  if (!isSel && me.button === 0) {
+                    toggleSelect(i, me.shiftKey);
+                  }
+                  // Initialize controlled drag position
+                  setDraggingNoteIndex(i);
+                  setDraggingPos({ x, y });
+                  // Ensure a preview tone is active for this note while dragging
                   if (!notePreviewHandles.current.has(i)) {
                     const handle = startTone(
                       project.tuningRootHz,
@@ -705,126 +750,98 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
                       Math.max(0, Math.min(1, note.velocity))
                     );
                     notePreviewHandles.current.set(i, handle);
-
-                    const stopOnce = () => {
-                      const h = notePreviewHandles.current.get(i);
-                      safeStop(h);
-                      notePreviewHandles.current.delete(i);
-                      window.removeEventListener("mouseup", stopOnce, true);
-                    };
-                    window.addEventListener("mouseup", stopOnce, true);
                   }
-                }
-              }}
-              onDragStart={(e) => {
-                const me = e as MouseEvent;
-                if (!isSel && me.button === 0) {
-                  toggleSelect(i, me.shiftKey);
-                }
-                // Initialize controlled drag position
-                setDraggingNoteIndex(i);
-                setDraggingPos({ x, y });
-                // Ensure a preview tone is active for this note while dragging
-                if (!notePreviewHandles.current.has(i)) {
-                  const handle = startTone(
-                    project.tuningRootHz,
-                    note.ratio,
-                    Math.max(0, Math.min(1, note.velocity))
-                  );
-                  notePreviewHandles.current.set(i, handle);
-                }
-                // Track pointer offset from note top to improve perceived follow
-                if (containerRef.current) {
-                  const rect = containerRef.current.getBoundingClientRect();
-                  const st0 = containerRef.current.scrollTop;
-                  // Account for scroll position at drag start so pointer offset is correct in content coordinates
-                  dragYOffsetRef.current = me.clientY - (rect.top - st0 + y);
-                }
-              }}
-              onDrag={(e, d) => {
-                const snapX = snapPxToQuarterGrid(d.x);
-                let snappedTop = d.y;
-                let newRatio = note.ratio;
-                if (containerRef.current) {
-                  const me = e as MouseEvent;
-                  const rect = containerRef.current.getBoundingClientRect();
-                  const st = containerRef.current.scrollTop;
-                  const desiredTop = me.clientY - rect.top + st - (dragYOffsetRef.current ?? 0);
-                  const nearest = findNearestRowByYPx(desiredTop + noteHPx / 2, rowPx);
-                  snappedTop = nearest.y - noteHPx / 2; // center to top
-                  newRatio = nearest.ratio;
-                } else {
-                  const nearest = findNearestRowByYPx(d.y + noteHPx / 2, rowPx);
-                  snappedTop = nearest.y - noteHPx / 2;
-                  newRatio = nearest.ratio;
-                }
-                setDraggingPos({ x: snapX, y: snappedTop });
-                // Retune active preview while dragging
-                const hdl = notePreviewHandles.current.get(i);
-                safeSetRatio(hdl, newRatio);
-              }}
-              onDragStop={(e, d) => {
-                const newStart = snapBeatToQuarter(pxToBeats(d.x));
-                let newRatio = note.ratio;
-                if (containerRef.current) {
-                  const me = e as MouseEvent;
-                  const rect = containerRef.current.getBoundingClientRect();
-                  const st = containerRef.current.scrollTop;
-                  const desiredTop = me.clientY - rect.top + st - (dragYOffsetRef.current ?? 0);
-                  newRatio = findNearestRowByYPx(desiredTop + noteHPx / 2, rowPx ).ratio;
-                } else {
-                  newRatio = findNearestRowByYPx(d.y + noteHPx / 2, rowPx).ratio;
-                }
-                updateNote(i, { start: newStart, ratio: newRatio });
-                setDraggingNoteIndex(null);
-                setDraggingPos(null);
-                dragYOffsetRef.current = null;
-                // Stop the preview started for drag if it wasn't started by a press
-                const h = notePreviewHandles.current.get(i);
-                safeStop(h);
-                notePreviewHandles.current.delete(i);
-              }}
-              onResizeStop={(_, __, ref, ___, pos) => {
-                const snappedStart = snapBeatToQuarter(pxToBeats(pos.x));
-                const snappedDur = Math.max(QUARTER_BEAT, snapBeatToQuarter(pxToBeats(ref.offsetWidth)));
-                updateNote(i, { start: snappedStart, duration: snappedDur });
-              }}
-              className={`note absolute px-1 flex items-center text-xs select-none ${
-                isFundamental
-                  ? "bg-white text-black ring-2 ring-yellow-400"
-                  : isSel
-                  ? "bg-blue-400 ring-2 ring-blue-200 text-white"
-                  : "bg-blue-600 hover:bg-blue-500 text-white"
-              }`}
-              title={`start=${note.start} dur=${note.duration} r=${ratioToString(note.ratio)}
+                  // Track pointer offset from note top to improve perceived follow
+                  if (containerRef.current) {
+                    const rect = containerRef.current.getBoundingClientRect();
+                    const st0 = containerRef.current.scrollTop;
+                    // Account for scroll position at drag start so pointer offset is correct in content coordinates
+                    dragYOffsetRef.current = me.clientY - (rect.top - st0 + y);
+                  }
+                }}
+                onDrag={(e, d) => {
+                  const snapX = snapPxToQuarterGrid(d.x);
+                  let snappedTop = d.y;
+                  let newRatio = note.ratio;
+                  if (containerRef.current) {
+                    const me = e as MouseEvent;
+                    const rect = containerRef.current.getBoundingClientRect();
+                    const st = containerRef.current.scrollTop;
+                    const desiredTop = me.clientY - rect.top + st - (dragYOffsetRef.current ?? 0);
+                    const nearest = findNearestRowByYPx(desiredTop + noteHPx / 2, rowPx);
+                    snappedTop = nearest.y - noteHPx / 2; // center to top
+                    newRatio = nearest.ratio;
+                  } else {
+                    const nearest = findNearestRowByYPx(d.y + noteHPx / 2, rowPx);
+                    snappedTop = nearest.y - noteHPx / 2;
+                    newRatio = nearest.ratio;
+                  }
+                  setDraggingPos({ x: snapX, y: snappedTop });
+                  // Retune active preview while dragging
+                  const hdl = notePreviewHandles.current.get(i);
+                  safeSetRatio(hdl, newRatio);
+                }}
+                onDragStop={(e, d) => {
+                  const newStart = snapBeatToQuarter(pxToBeats(d.x));
+                  let newRatio = note.ratio;
+                  if (containerRef.current) {
+                    const me = e as MouseEvent;
+                    const rect = containerRef.current.getBoundingClientRect();
+                    const st = containerRef.current.scrollTop;
+                    const desiredTop = me.clientY - rect.top + st - (dragYOffsetRef.current ?? 0);
+                    newRatio = findNearestRowByYPx(desiredTop + noteHPx / 2, rowPx).ratio;
+                  } else {
+                    newRatio = findNearestRowByYPx(d.y + noteHPx / 2, rowPx).ratio;
+                  }
+                  updateNote(i, { start: newStart, ratio: newRatio });
+                  setDraggingNoteIndex(null);
+                  setDraggingPos(null);
+                  dragYOffsetRef.current = null;
+                  // Stop the preview started for drag if it wasn't started by a press
+                  const h = notePreviewHandles.current.get(i);
+                  safeStop(h);
+                  notePreviewHandles.current.delete(i);
+                }}
+                onResizeStop={(_, __, ref, ___, pos) => {
+                  const snappedStart = snapBeatToQuarter(pxToBeats(pos.x));
+                  const snappedDur = Math.max(QUARTER_BEAT, snapBeatToQuarter(pxToBeats(ref.offsetWidth)));
+                  updateNote(i, { start: snappedStart, duration: snappedDur });
+                }}
+                className={`note absolute px-1 flex items-center text-xs select-none ${isFundamental
+                    ? "bg-white text-black ring-2 ring-yellow-400"
+                    : isSel
+                      ? "bg-blue-400 ring-2 ring-blue-200 text-white"
+                      : "bg-blue-600 hover:bg-blue-500 text-white"
+                  }`}
+                title={`start=${note.start} dur=${note.duration} r=${ratioToString(note.ratio)}
                    f=${project.tuningRootHz * ratioToFloat(note.ratio)}Hz`}
-              onDoubleClick={() =>
-                playTone(project.tuningRootHz, note.ratio, note.duration, note.velocity)
-              }
-            >
-              {note.ratio.num}/{note.ratio.den}
-            </Rnd>
-          );
-        })}
+                onDoubleClick={() =>
+                  playTone(project.tuningRootHz, note.ratio, note.duration, note.velocity)
+                }
+              >
+                {note.ratio.num}/{note.ratio.den}
+              </Rnd>
+            );
+          })}
 
-        {/* Playhead (grid) */}
-        <div
-          className="absolute pointer-events-none border-l-2 border-red-400 z-30"
-          style={{ left: playheadBeat * beatPx, top: 0, height: heightPx }}
-        />
-
-        {/* Marquee rectangle */}
-        {marquee.active && (
+          {/* Playhead (grid) */}
           <div
-            className="absolute pointer-events-none border border-blue-300/80 bg-blue-400/10"
-            style={{
-              left: Math.min(marquee.x, marquee.x + marquee.w),
-              top: Math.min(marquee.y, marquee.y + marquee.h),
-              width: Math.abs(marquee.w),
-              height: Math.abs(marquee.h),
-            }}
+            className="absolute pointer-events-none border-l-2 border-red-400 z-30"
+            style={{ left: playheadBeat * beatPx, top: 0, height: heightPx }}
           />
-        )}
+
+          {/* Marquee rectangle */}
+          {marquee.active && (
+            <div
+              className="absolute pointer-events-none border border-blue-300/80 bg-blue-400/10"
+              style={{
+                left: Math.min(marquee.x, marquee.x + marquee.w),
+                top: Math.min(marquee.y, marquee.y + marquee.h),
+                width: Math.abs(marquee.w),
+                height: Math.abs(marquee.h),
+              }}
+            />
+          )}
         </div>
       </div>
     </div>

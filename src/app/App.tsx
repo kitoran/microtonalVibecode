@@ -1,19 +1,21 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import PianoRoll from "../components/PianoRoll";
 import { exampleProject } from "../model/example-project";
 import type { Project } from "../model/project";
-
+import { ProjectProvider } from "../ProjectContext";
 export default function App() {
-  const [project, setProject] = useState<Project>(exampleProject);
+  let loadded=localStorage.getItem("project");
+  const [project, setProject] = useState<Project>(loadded?JSON.parse(loadded):exampleProject);
   const [history, setHistory] = useState<Project[]>([]);
   const [future, setFuture] = useState<Project[]>([]);
 
   // Wrap setProject to push to history
-  const setProjectWithHistory = useCallback((next: Project) => {
+  const setProjectWithHistory = () => {
     setHistory((h) => [...h, project]);
     setFuture([]); // clear redo stack
-    setProject(next);
-  }, [project]);
+    setProject(project);
+    localStorage.setItem("project", JSON.stringify(project));
+  };
 
   const undo = useCallback(() => {
     setHistory((h) => {
@@ -35,7 +37,7 @@ export default function App() {
 
 
   return (
-    <div className="h-screen w-full bg-neutral-900 text-white flex flex-col">
+  <div className="h-screen w-full bg-neutral-900 text-white flex flex-col">
       <header className="p-4 border-b border-neutral-700">
         {/*  <h1 className="text-2xl font-bold"> */}
         {project.name}
@@ -48,7 +50,9 @@ export default function App() {
           <button onClick={undo} disabled={history.length === 0}>Undo</button>
           <button onClick={redo} disabled={future.length === 0}>Redo</button>
         </div>
-        <PianoRoll project={project} setProject={setProjectWithHistory} channelId="ch1" />
+      <ProjectProvider>
+        <PianoRoll channelId="ch1" />
+      </ProjectProvider>
       </main>
     </div>
   );
