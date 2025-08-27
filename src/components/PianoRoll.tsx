@@ -394,58 +394,71 @@ export default function PianoRoll({ channelId }: PianoRollProps) {
     };
   }, []);
 
-// --- Draw note interaction (left mouse drag on empty grid) ---
-const [drawing, setDrawing] = useState<null | { anchorBeat: number; endBeat: number; ratio: Ratio }>(null);
+  // --- Draw note interaction (left mouse drag on empty grid) ---
+  const [drawing, setDrawing_] = useState<null | { anchorBeat: number; endBeat: number; ratio: Ratio }>(null);
+      console.log("drawing", drawing);
+  const setDrawing = (f) => {
+    if(typeof(f) === "function") {
+      console.log("setting drawing to ", f(drawing), "probably");
+    } else {
+      console.log("setting drawing to ", f);
 
-const beginDrawNote = (clientX: number, clientY: number, rowPx: number) => {
-  if (!containerRef.current) return;
-  const rect = containerRef.current.getBoundingClientRect();
-  const st = containerRef.current.scrollTop;
-
-  const snapBeat = (px: number) => floorBeatToQuarter(pxToBeats(px));
-  const anchorBeat = snapBeat(clientX - rect.left);
-
-  const nearestStart = findNearestRowByYPx(clientY - rect.top + st, rowPx);
-  setDrawing({ anchorBeat, endBeat: anchorBeat, ratio: nearestStart.ratio });
-
-  // start preview tone while drawing
-  try {
-    drawingPreviewRef.current = startTone(project.tuningRootHz, nearestStart.ratio, 1);
-  } catch {}
-
-  const onMove = (e: MouseEvent) => {
+    }
+    if(f === null) {
+      console.log("breakpoint");
+    }
+    setDrawing_(f);
+  }
+  const beginDrawNote = (clientX: number, clientY: number, rowPx: number) => {
     if (!containerRef.current) return;
-    const r = containerRef.current.getBoundingClientRect();
-    const st2 = containerRef.current.scrollTop;
-    const bx = snapBeatToQuarter(pxToBeats(e.clientX - r.left));
-    const nearest = findNearestRowByYPx(e.clientY - r.top + st2, rowPx);
+    const rect = containerRef.current.getBoundingClientRect();
+    const st = containerRef.current.scrollTop;
 
-    // retune preview tone to nearest row while dragging
-    safeSetRatio(drawingPreviewRef.current, nearest.ratio);
+    const snapBeat = (px: number) => floorBeatToQuarter(pxToBeats(px));
+    const anchorBeat = snapBeat(clientX - rect.left);
 
-    setDrawing((d) => (d ? { ...d, endBeat: bx, ratio: nearest.ratio } : d));
-  };
+    const nearestStart = findNearestRowByYPx(clientY - rect.top + st, rowPx);
+    setDrawing({ anchorBeat, endBeat: anchorBeat, ratio: nearestStart.ratio });
 
-  const onUp = (_: MouseEvent) => {
-    window.removeEventListener("mousemove", onMove, true);
-    window.removeEventListener("mouseup", onUp, true);
+    // start preview tone while drawing
+    try {
+      drawingPreviewRef.current = startTone(project.tuningRootHz, nearestStart.ratio, 1);
+    } catch { }
 
-    // stop preview tone
-    const preview = drawingPreviewRef.current;
-    safeStop(preview);
-    drawingPreviewRef.current = null;
+    const onMove = (e: MouseEvent) => {
+      if (!containerRef.current) return;
+      const r = containerRef.current.getBoundingClientRect();
+      const st2 = containerRef.current.scrollTop;
+      const bx = snapBeatToQuarter(pxToBeats(e.clientX - r.left));
+      const nearest = findNearestRowByYPx(e.clientY - r.top + st2, rowPx);
 
-    // compute note once, then clear drawing and update project separately
-    let created: Note | null = null;
-    setDrawing((d) => {
-      console.log("SETDrawing", d);
-      if (!d) return null;
-      const start = Math.min(d.anchorBeat, d.endBeat);
-      const durRaw = Math.abs(d.endBeat - d.anchorBeat);
-      const duration = durRaw < 0.01 ? 1 : Math.max(QUARTER_BEAT, snapBeatToQuarter(durRaw));
-      created = { start, duration, ratio: d.ratio, velocity: 1.0 };
+      // retune preview tone to nearest row while dragging
+      safeSetRatio(drawingPreviewRef.current, nearest.ratio);
+
+      setDrawing((d) => (d ? { ...d, endBeat: bx, ratio: nearest.ratio } : d));
+    };
+
+    const onUp = (_: MouseEvent) => {
+      console.log("onUp drawing", drawing);
+      window.removeEventListener("mousemove", onMove, true);
+      window.removeEventListener("mouseup", onUp, true);
+
+      // stop preview tone
+      const preview = drawingPreviewRef.current;
+      safeStop(preview);
+      drawingPreviewRef.current = null;
+
+      // compute note once, then clear drawing and update project separately
+      let created: Note | null = null;
+      if(drawing) {
+        const start = Math.min(drawing.anchorBeat, drawing.endBeat);
+        const durRaw = Math.abs(drawing.endBeat - drawing.anchorBeat);
+        const duration = durRaw < 0.01 ? 1 : Math.max(QUARTER_BEAT, snapBeatToQuarter(durRaw));
+        created = { start, duration, ratio: drawing.ratio, velocity: 1.0 };
+
+      }
       //return null; // clear the ghost
-      
+      setDrawing(null);
       console.log("after set drawing, created=", created);
       if (created) {
         console.log("created");
@@ -456,16 +469,15 @@ const beginDrawNote = (clientX: number, clientY: number, rowPx: number) => {
               ch.id === channelId ? { ...ch, notes: [...ch.notes, created!] } : ch
             ),
           };
-          console.log(res);
-        
+          console.log(res); 
+          return res;
         });
       }
-    });
-  };
+    };
 
-  window.addEventListener("mousemove", onMove, true);
-  window.addEventListener("mouseup", onUp, true);
-};
+    window.addEventListener("mousemove", onMove, true);
+    window.addEventListener("mouseup", onUp, true);
+  };
 
 
   // --- Delete selected notes ---
@@ -808,10 +820,10 @@ const beginDrawNote = (clientX: number, clientY: number, rowPx: number) => {
                   updateNote(i, { start: snappedStart, duration: snappedDur });
                 }}
                 className={`note absolute px-1 flex items-center text-xs select-none ${isFundamental
-                    ? "bg-white text-black ring-2 ring-yellow-400"
-                    : isSel
-                      ? "bg-blue-400 ring-2 ring-blue-200 text-white"
-                      : "bg-blue-600 hover:bg-blue-500 text-white"
+                  ? "bg-white text-black ring-2 ring-yellow-400"
+                  : isSel
+                    ? "bg-blue-400 ring-2 ring-blue-200 text-white"
+                    : "bg-blue-600 hover:bg-blue-500 text-white"
                   }`}
                 title={`start=${note.start} dur=${note.duration} r=${ratioToString(note.ratio)}
                    f=${project.tuningRootHz * ratioToFloat(note.ratio)}Hz`}
