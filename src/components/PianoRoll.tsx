@@ -796,7 +796,7 @@ export default function PianoRoll({ project, setProject, channelId }: PianoRollP
                   ? "bg-blue-400 ring-2 ring-blue-200 text-white"
                   : "bg-blue-600 hover:bg-blue-500 text-white"
               }`}
-              title={`start=${note.start} dur=${note.duration} r=${note.ratio}`}
+              title={`start=${note.start} dur=${note.duration} r=${ratioToString(note.ratio)} f=${ratioToFloat(note.ratio)}`}
               onDoubleClick={() =>
                 playTone(project.tuningRootHz, note.ratio, note.duration, note.velocity)
               }

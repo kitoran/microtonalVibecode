@@ -9,8 +9,10 @@ export default function App() {
   return (
     <div className="h-screen w-full bg-neutral-900 text-white flex flex-col">
       <header className="p-4 border-b border-neutral-700">
-        <h1 className="text-2xl font-bold">{project.name}</h1>
-        <p className="text-sm text-neutral-400">Just Intonation · Multichannel</p>
+        {/*  <h1 className="text-2xl font-bold"> */}
+        {project.name}
+        {/* </header></h1``> */}
+        {/* { <p className="text-sm text-neutral-400">Just Intonation · Multichannel</p>  */}
       </header>
 
       <main className="flex-1 min-h-0 p-4 flex flex-col">
