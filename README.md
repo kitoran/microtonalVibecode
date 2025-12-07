@@ -1,69 +1,76 @@
-# React + TypeScript + Vite
+# MicrotonalVibecode
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+MicrotonalVibecode is a React + TypeScript + Vite application for editing and playing microtonal music using just intonation. It features a piano roll interface for note editing, selection, and playback, with support for custom tuning maps and sample-based audio.
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- **Piano Roll UI:** Edit notes, select areas, drag to move/resize, and set the fundamental note.
+- **Microtonal Tuning:** Supports custom tuning maps with rational frequency ratios.
+- **Sample-Based Playback:** Uses a CC0-licensed upright piano sample set for realistic sound.
+- **Transport Controls:** Play, pause, stop, and loop time selections.
+- **Undo/Redo:** Step through project history.
+- **Local Storage:** Project state is saved in the browser.
 
-## Expanding the ESLint configuration
+## Getting Started
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+### Prerequisites
 
-```js
-export default tseslint.config([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+- Node.js (v18+ recommended)
+- npm
 
-      // Remove tseslint.configs.recommended and replace with this
-      ...tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      ...tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      ...tseslint.configs.stylisticTypeChecked,
+### Installation
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```sh
+npm install
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+### Development
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+Start the development server:
 
-export default tseslint.config([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```sh
+npm run dev
 ```
+
+Open [http://localhost:5173](http://localhost:5173) in your browser.
+
+### Build
+
+```sh
+npm run build
+```
+
+### Lint
+
+```sh
+npm run lint
+```
+
+## Project Structure
+
+- [`src/app/App.tsx`](src/app/App.tsx): Main app component, manages project state and history.
+- [`src/components/PianoRoll.tsx`](src/components/PianoRoll.tsx): Piano roll UI and interaction logic.
+- [`src/audio/engine.ts`](src/audio/engine.ts): Audio playback engine using Web Audio API and piano samples.
+- [`src/model/project.ts`](src/model/project.ts): Data models for notes, ratios, channels, and projects.
+- [`src/model/example-project.ts`](src/model/example-project.ts): Example project data.
+- [`src/utils/ratio.ts`](src/utils/ratio.ts): Utility functions for ratio math.
+- [`src/assets/UprightPianoKW-SFZ+FLAC-20220221/`](src/assets/UprightPianoKW-SFZ+FLAC-20220221/): CC0 piano sample set.
+
+## Usage
+
+- **Left click:** Add notes.
+- **Right drag:** Area selection (marquee).
+- **Middle click:** Set fundamental note (affects grid display).
+- **Drag notes:** Move or resize notes.
+- **Double click note:** Play note.
+- **Spacebar:** Play/pause.
+- **Delete/Backspace:** Delete selected notes.
+
+## License
+
+- Code: MIT License.
+- Piano samples: [CC0 1.0 Universal](src/assets/UprightPianoKW-SFZ+FLAC-20220221/UprightPianoKW-SFZ+FLAC-20220221/cc0.txt).
+
+## Credits
+
+- Upright piano samples by Gonzalo & Roberto,

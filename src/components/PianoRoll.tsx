@@ -86,7 +86,12 @@ export default function PianoRoll({ channelId }: PianoRollProps) {
 
 
   // --- Transport / timeline state ---
-  const [playheadBeat, setPlayheadBeat] = useState<number>(0);
+  const [playheadBeat, setPlayheadBeatReal] = useState<number>(5);
+  const setPlayheadBeat = (b:number) => {
+    console.log("setPlayheadBeat", b, new Error());
+    setPlayheadBeatReal(b);
+
+  }
   const [timeSelection, setTimeSelection] = useState<{ start: number; end: number } | null>(null);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [vZoom, setVZoom] = useState<number>(1);
@@ -354,6 +359,7 @@ export default function PianoRoll({ channelId }: PianoRollProps) {
   };
 
   const startPlayback = (fromBeat?: number) => {
+    console.log("startPlayback frombeat=", fromBeat, "timeSelection", timeSelection, "playhead", playheadBeat);
     if (isPlaying) return;
     const startBeat = Math.max(0, fromBeat ?? (timeSelection ? timeSelection.start : playheadBeat));
     setPlayheadBeat(startBeat);
@@ -399,7 +405,7 @@ export default function PianoRoll({ channelId }: PianoRollProps) {
       console.log("drawing", drawing);
   const setDrawing = (f) => {
     if(typeof(f) === "function") {
-      console.log("setting drawing to ", f(drawing), "probably");
+      console.log("setting drawing to ", f(drawing), "probably", f, drawing);
     } else {
       console.log("setting drawing to ", f);
 
@@ -479,7 +485,7 @@ export default function PianoRoll({ channelId }: PianoRollProps) {
     window.addEventListener("mouseup", onUp, true);
   };
 
-
+  const pauseUnpause=()=>isPlaying ? pausePlayback() : startPlayback();
   // --- Delete selected notes ---
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -495,13 +501,16 @@ export default function PianoRoll({ channelId }: PianoRollProps) {
         setSelected(new Set());
       }
       if (e.code === "Space") {
-        e.preventDefault();
-        if (isPlaying) pausePlayback(); else startPlayback();
+        console.log("playhead", playheadBeat);
+        // e.preventDefault();
+        pauseUnpause();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [project, selected, channelId, setProject, isPlaying]);
+  }, [project, selected, channelId, setProject, isPlaying,
+    playheadBeat, playbackStartBeatRef
+  ]);
 
   // --- Cleanup any active note previews on unmount ---
   useEffect(() => {
@@ -541,11 +550,15 @@ export default function PianoRoll({ channelId }: PianoRollProps) {
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
+    <div className="debugInfo"> 
+      {`playheadbead ${playheadBeat}
+       playbackStartBeatRef ${playbackStartBeatRef.current}`}
+    </div>
       {/* Transport */}
       <div className="flex items-center gap-2 mb-2">
         <button
           className={`px-3 py-1 rounded ${isPlaying ? "bg-yellow-600 hover:bg-yellow-500" : "bg-green-700 hover:bg-green-600"}`}
-          onClick={() => (isPlaying ? pausePlayback() : startPlayback())}
+          onClick={pauseUnpause}
           title="Space: Play/Pause"
         >
           {isPlaying ? "Pause" : "Play"}
@@ -838,7 +851,7 @@ export default function PianoRoll({ channelId }: PianoRollProps) {
 
           {/* Playhead (grid) */}
           <div
-            className="absolute pointer-events-none border-l-2 border-red-400 z-30"
+            className="absolute pointer-events-none border-l-2 border-red-400 z-30 playhead"
             style={{ left: playheadBeat * beatPx, top: 0, height: heightPx }}
           />
 
