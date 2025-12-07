@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { type Project, type Note, type Ratio, ratioToString } from "../model/project";
 import { divideRatios, multiplyRatios, ratioToFloat } from "../utils/ratio";
 import { playTone, startTone } from "../audio/engine";
@@ -111,7 +111,7 @@ export default function PianoRoll({ channelId }: PianoRollProps) {
     { active: false, x: 0, y: 0, w: 0, h: 0 }
   );
   // Preview handle for drawing new notes
-  const drawingPreviewRef = useRef<{ stop: () => void; setRatio?: (r: Ratio) => void } | null>(null);
+  const drawingPrelistenRef = useRef<{ stop: () => void; setRatio?: (r: Ratio) => void } | null>(null);
 
   // Track container size to compute dynamic layout (fit to screen)
   const [containerSize, setContainerSize] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
@@ -401,19 +401,21 @@ export default function PianoRoll({ channelId }: PianoRollProps) {
   }, []);
 
   // --- Draw note interaction (left mouse drag on empty grid) ---
-  const [drawing, setDrawing_] = useState<null | { anchorBeat: number; endBeat: number; ratio: Ratio }>(null);
-      console.log("drawing", drawing);
-  const setDrawing = (f) => {
-    if(typeof(f) === "function") {
-      console.log("setting drawing to ", f(drawing), "probably", f, drawing);
-    } else {
-      console.log("setting drawing to ", f);
+  type DrawingType = { anchorBeat: number; endBeat: number; ratio: Ratio };
+  const [drawingPreview, setDrawingPreview] = useState<null | DrawingType>(null);
+      console.log("drawing", drawingPreview);
+  const setDrawing = (d:DrawingType|null) => {
+    // if(typeof(f) === "function") {
+      // console.log("setting drawing to ", f(drawing), "probably", f, drawing, new Error());
+    // } else
+       {
+      console.log("setting drawing to ", d);
 
+      setDrawingPreview(d);
     }
-    if(f === null) {
-      console.log("breakpoint");
-    }
-    setDrawing_(f);
+    // if(f === null) {
+      // console.log("breakpoint");
+    // }
   }
   const beginDrawNote = (clientX: number, clientY: number, rowPx: number) => {
     if (!containerRef.current) return;
@@ -428,61 +430,59 @@ export default function PianoRoll({ channelId }: PianoRollProps) {
 
     // start preview tone while drawing
     try {
-      drawingPreviewRef.current = startTone(project.tuningRootHz, nearestStart.ratio, 1);
+      drawingPrelistenRef.current = startTone(project.tuningRootHz, nearestStart.ratio, 1);
     } catch { }
 
-    const onMove = (e: MouseEvent) => {
-      if (!containerRef.current) return;
-      const r = containerRef.current.getBoundingClientRect();
-      const st2 = containerRef.current.scrollTop;
-      const bx = snapBeatToQuarter(pxToBeats(e.clientX - r.left));
-      const nearest = findNearestRowByYPx(e.clientY - r.top + st2, rowPx);
+  };
+  const onMoveDrawing = (e:MouseEvent<HTMLDivElement, MouseEvent>) => {
+    if (!containerRef.current) return;
+    const r = containerRef.current.getBoundingClientRect();
+    const st2 = containerRef.current.scrollTop;
+    const bx = snapBeatToQuarter(pxToBeats(e.clientX - r.left));
+    const nearest = findNearestRowByYPx(e.clientY - r.top + st2, rowPx);
 
-      // retune preview tone to nearest row while dragging
-      safeSetRatio(drawingPreviewRef.current, nearest.ratio);
+    // retune preview tone to nearest row while dragging
+    safeSetRatio(drawingPrelistenRef.current, nearest.ratio);
 
-      setDrawing((d) => (d ? { ...d, endBeat: bx, ratio: nearest.ratio } : d));
-    };
+    setDrawingPreview((c) => c?{ ...c, endBeat: bx, ratio: nearest.ratio }:c);
+    requestAnimationFrame(tick);
+  };
+  const onUpDrawing = (_: MouseEvent) => {
+    
+    console.log("onUp drawing", drawingPreview);
+    // window.removeEventListener("mousemove", onMove, true);
+    // window.removeEventListener("mouseup", onUp, true);
 
-    const onUp = (_: MouseEvent) => {
-      console.log("onUp drawing", drawing);
-      window.removeEventListener("mousemove", onMove, true);
-      window.removeEventListener("mouseup", onUp, true);
+    // stop preview tone
+    const preview = drawingPrelistenRef.current;
+    safeStop(preview);
+    drawingPrelistenRef.current = null;
 
-      // stop preview tone
-      const preview = drawingPreviewRef.current;
-      safeStop(preview);
-      drawingPreviewRef.current = null;
+    // compute note once, then clear drawing and update project separately
+    let created: Note | null = null;
+    if(drawingPreview) {
+      const start = Math.min(drawingPreview.anchorBeat, drawingPreview.endBeat);
+      const durRaw = Math.abs(drawingPreview.endBeat - drawingPreview.anchorBeat);
+      const duration = durRaw < 0.01 ? 1 : Math.max(QUARTER_BEAT, snapBeatToQuarter(durRaw));
+      created = { start, duration, ratio: drawingPreview.ratio, velocity: 1.0 };
 
-      // compute note once, then clear drawing and update project separately
-      let created: Note | null = null;
-      if(drawing) {
-        const start = Math.min(drawing.anchorBeat, drawing.endBeat);
-        const durRaw = Math.abs(drawing.endBeat - drawing.anchorBeat);
-        const duration = durRaw < 0.01 ? 1 : Math.max(QUARTER_BEAT, snapBeatToQuarter(durRaw));
-        created = { start, duration, ratio: drawing.ratio, velocity: 1.0 };
-
-      }
-      //return null; // clear the ghost
-      setDrawing(null);
-      console.log("after set drawing, created=", created);
-      if (created) {
-        console.log("created");
-        setProject((prev) => {
-          let res = {
-            ...prev,
-            channels: prev.channels.map((ch) =>
-              ch.id === channelId ? { ...ch, notes: [...ch.notes, created!] } : ch
-            ),
-          };
-          console.log(res); 
-          return res;
-        });
-      }
-    };
-
-    window.addEventListener("mousemove", onMove, true);
-    window.addEventListener("mouseup", onUp, true);
+    }
+    //return null; // clear the ghost
+    setDrawing(null);
+    console.log("after set drawing, created=", created);
+    if (created) {
+      console.log("created");
+      setProject((prev) => {
+        let res = {
+          ...prev,
+          channels: prev.channels.map((ch) =>
+            ch.id === channelId ? { ...ch, notes: [...ch.notes, created!] } : ch
+          ),
+        };
+        console.log(res); 
+        return res;
+      });
+    }
   };
 
   const pauseUnpause=()=>isPlaying ? pausePlayback() : startPlayback();
@@ -552,7 +552,9 @@ export default function PianoRoll({ channelId }: PianoRollProps) {
     <div className="flex flex-col flex-1 min-h-0">
     <div className="debugInfo"> 
       {`playheadbead ${playheadBeat}
-       playbackStartBeatRef ${playbackStartBeatRef.current}`}
+       playbackStartBeatRef ${playbackStartBeatRef.current}
+       drawingEnd ${drawingPreview?.endBeat}
+       `}
     </div>
       {/* Transport */}
       <div className="flex items-center gap-2 mb-2">
@@ -649,6 +651,16 @@ export default function PianoRoll({ channelId }: PianoRollProps) {
             beginDrawNote(e.clientX, e.clientY, rowPx);
           }
         }}
+        onMouseMove={(e) => {
+          if(drawingPreview) {
+            onMoveDrawing(e)
+          }
+        }}
+        onMouseUp={(e) => {
+          if(drawingPreview) {
+            onUpDrawing(e);
+          }
+        }}
       >
         <div className="relative" style={{ width: widthPx, height: heightPx }}>
           {/* Horizontal pitch rows (displayed relative to fundamental via displayRows). */}
@@ -695,13 +707,13 @@ export default function PianoRoll({ channelId }: PianoRollProps) {
           )}
 
           {/* Drawing note preview */}
-          {drawing && (
+          {drawingPreview && (
             <div
               className="absolute bg-blue-500/70 ring-2 ring-blue-200 pointer-events-none"
               style={{
-                left: Math.min(drawing.anchorBeat, drawing.endBeat) * beatPx,
-                width: Math.max(quarterBeatPx, Math.abs(drawing.endBeat - drawing.anchorBeat) * beatPx),
-                top: getY(drawing.ratio) * rowPx - noteHPx / 2,
+                left: Math.min(drawingPreview.anchorBeat, drawingPreview.endBeat) * beatPx,
+                width: Math.max(quarterBeatPx, Math.abs(drawingPreview.endBeat - drawingPreview.anchorBeat) * beatPx),
+                top: getY(drawingPreview.ratio) * rowPx - noteHPx / 2,
                 height: noteHPx,
               }}
             />
